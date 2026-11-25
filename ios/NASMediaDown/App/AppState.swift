@@ -63,6 +63,7 @@ final class AppState {
     private(set) var currentVersion: String?
     private(set) var api: APIClient?
     private(set) var toast: ToastMessage?
+    private(set) var pendingProbeURL: String?
 
     var selectedTab: AppTab = .download
 
@@ -178,6 +179,23 @@ final class AppState {
         jobs.stop()
         api = nil
         route = .servers
+    }
+
+    // MARK: - 深链接
+
+    /// 处理其他应用分享后打开的深链接，切换到下载页等待探测。
+    /// - Parameter url: 应用收到的深链接。
+    func handleDeepLink(_ url: URL) {
+        guard let link = DeepLink.probeLink(from: url) else { return }
+        pendingProbeURL = link
+        selectedTab = .download
+    }
+
+    /// 取出并清空待探测的分享链接。
+    /// - Returns: 待探测的网页链接，没有时返回 `nil`。
+    func consumePendingProbeURL() -> String? {
+        defer { pendingProbeURL = nil }
+        return pendingProbeURL
     }
 
     // MARK: - 轻提示

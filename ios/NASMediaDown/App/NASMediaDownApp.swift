@@ -8,6 +8,9 @@ struct NASMediaDownApp: App {
         WindowGroup {
             RootView()
                 .environment(app)
+                .onOpenURL { url in
+                    app.handleDeepLink(url)
+                }
         }
     }
 }
