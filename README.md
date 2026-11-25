@@ -4,7 +4,7 @@
 
 - 单容器部署（Docker Compose），不依赖外部数据库
 - 强制密码登录，会话存服务端
-- 播放列表勾选、任务进度、历史记录、文件浏览与在线预览
+- 播放列表勾选、列表内并行下载、任务进度、历史记录、文件浏览与在线预览
 - yt-dlp + ffmpeg + Deno（YouTube 完整支持），随构建固定版本
 - 深色玻璃拟态界面，适配手机
 
@@ -57,7 +57,7 @@
 | `DATA_PATH` | `./data` | SQLite 与会话数据目录 |
 | `PUID` / `PGID` | `1026` / `100` | 文件属主 |
 | `PORT` | `8080` | 对外端口 |
-| `MAX_CONCURRENT` | `2` | 同时下载的任务数 |
+| `MAX_CONCURRENT` | `2` | 同时下载的视频数（跨任务共享，播放列表内也会并行） |
 | `MAX_PLAYLIST_ITEMS` | `500` | 播放列表单次加载/下载上限 |
 | `MERGE_FORMAT` | `mp4/mkv` | 合并容器优先级；能 mp4 就 mp4，否则无损 mkv |
 | `COOKIE_SECURE` | `false` | 通过 HTTPS 反向代理访问时设为 `true` |

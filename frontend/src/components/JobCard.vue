@@ -34,14 +34,17 @@ const items = computed<JobItem[]>(() => props.job.items ?? detailItems.value ?? 
 const percent = computed(() =>
   Math.min(100, Math.max(0, Math.round(props.job.progress * 100))),
 )
-const currentItem = computed(
-  () =>
-    items.value.find((item) => item.status === 'downloading') ??
-    items.value.find((item) => item.status === 'processing') ??
-    null,
+const activeItems = computed(() =>
+  items.value.filter((item) => item.status === 'downloading'),
+)
+const activeSpeed = computed(() =>
+  activeItems.value.reduce((total, item) => total + (item.speed ?? 0), 0),
+)
+const activeEta = computed(() =>
+  activeItems.value.reduce((longest, item) => Math.max(longest, item.eta ?? 0), 0),
 )
 const canRetry = computed(() =>
-  ['failed', 'cancelled', 'interrupted'].includes(props.job.status),
+  ['failed', 'cancelled', 'interrupted', 'partial'].includes(props.job.status),
 )
 
 const STATUS_META: Record<JobStatus, { label: string; cls: string }> = {
@@ -242,9 +245,10 @@ async function retry(): Promise<void> {
       </div>
       <div class="mt-1.5 flex items-center justify-between gap-3 text-[11px] text-slate-500">
         <span>{{ percent }}%</span>
-        <span v-if="isActive && currentItem" class="truncate">
-          {{ formatSpeed(currentItem.speed) }}
-          <template v-if="currentItem.eta"> · {{ formatEta(currentItem.eta) }}</template>
+        <span v-if="isActive && activeItems.length" class="truncate">
+          {{ activeItems.length }} 个并行
+          <template v-if="activeSpeed > 0"> · {{ formatSpeed(activeSpeed) }}</template>
+          <template v-if="activeEta > 0"> · {{ formatEta(activeEta) }}</template>
         </span>
         <span v-else-if="job.finished_at">{{ formatDate(job.finished_at) }}</span>
       </div>

@@ -107,7 +107,7 @@ class JobRuntime:
     created_at: int = field(default_factory=db.now_ts)
     started_at: int | None = None
     finished_at: int | None = None
-    current_idx: int | None = None
+    pending: int = 0
     cancel: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
     last_flush: float = 0.0
@@ -213,14 +213,16 @@ class JobManager:
             items_spec=items_spec,
         )
 
+        runtime.pending = len(runtime.items)
         self._persist_new_job(runtime)
         with self._lock:
             self._jobs[runtime.id] = runtime
 
         try:
-            self.executor.submit(self._run, runtime.id)
+            for idx in list(runtime.items):
+                self.executor.submit(self._run_item, runtime.id, idx)
         except RuntimeError as exc:
-            self._finish(runtime, "failed", f"任务调度失败：{exc}")
+            self._fail_pending(runtime, f"任务调度失败：{exc}")
             raise JobCreateError("任务调度失败，请稍后重试", status_code=503) from exc
 
         return runtime
@@ -330,7 +332,7 @@ class JobManager:
 
     # --------------------------------------------------------------- execution
 
-    def _build_opts(self, runtime: JobRuntime) -> dict:
+    def _build_item_opts(self, runtime: JobRuntime, idx: int) -> dict:
         opts: dict = {
             "quiet": True,
             "no_warnings": True,
@@ -342,72 +344,137 @@ class JobManager:
             "merge_output_format": self.settings.merge_format,
             "outtmpl": {"default": "%(title).180B [%(id)s].%(ext)s"},
             "paths": {"home": str(runtime.target_dir)},
-            "noplaylist": runtime.kind == "video",
             "overwrites": False,
-            "progress_hooks": [lambda data: self._on_progress(runtime, data)],
-            "postprocessor_hooks": [lambda data: self._on_postprocess(runtime, data)],
+            "progress_hooks": [lambda data: self._on_progress(runtime, idx, data)],
+            "postprocessor_hooks": [lambda data: self._on_postprocess(runtime, idx, data)],
             "logger": _JobLogger(runtime),
         }
-        if runtime.items_spec:
-            opts["playlist_items"] = runtime.items_spec
+        if runtime.kind == "video":
+            opts["noplaylist"] = True
+        else:
+            opts["playlist_items"] = str(idx)
         if self.settings.cookies_file and self.settings.cookies_file.exists():
             opts["cookiefile"] = str(self.settings.cookies_file)
         if shutil.which("deno"):
             opts["js_runtimes"] = {"deno": {}}
         return opts
 
-    def _run(self, job_id: str) -> None:
+    def _run_item(self, job_id: str, idx: int) -> None:
+        """下载任务中的一个视频条目；多个条目由线程池并发执行。"""
         with self._lock:
             runtime = self._jobs.get(job_id)
         if runtime is None:
             return
 
-        if runtime.cancel.is_set():
-            self._finish(runtime, "cancelled")
-            return
-
         with runtime.lock:
-            runtime.status = "running"
-            runtime.started_at = db.now_ts()
+            item = runtime.items.get(idx)
+            if item is None:
+                return
+            cancelled = runtime.cancel.is_set()
+            if cancelled:
+                item.status = "cancelled"
+                item.error = item.error or "已取消"
+                item.speed = None
+                item.eta = 0
+            else:
+                item.status = "downloading"
+                if runtime.status == "queued":
+                    runtime.status = "running"
+                    runtime.started_at = db.now_ts()
+            runtime.progress = self._progress_locked(runtime)
         self._flush(runtime)
+
+        if cancelled:
+            self._item_finished(runtime)
+            return
 
         runtime.target_dir.mkdir(parents=True, exist_ok=True)
         try:
-            with yt_dlp.YoutubeDL(self._build_opts(runtime)) as ydl:
+            with yt_dlp.YoutubeDL(self._build_item_opts(runtime, idx)) as ydl:
                 ydl.download([runtime.url])
         except DownloadCancelled:
-            self._finish(runtime, "cancelled")
-            return
+            self._mark_item(runtime, idx, "cancelled", error="已取消")
         except Exception as exc:  # noqa: BLE001 - 统一转成用户可读错误
-            logger.exception("下载任务失败：%s", runtime.id)
-            self._finish(runtime, "failed", friendly_error(exc))
-            return
+            logger.exception("下载失败：%s / 条目 %s", runtime.id, idx)
+            self._mark_item(runtime, idx, "failed", error=friendly_error(exc))
+        else:
+            self._mark_item(runtime, idx, "done")
+        finally:
+            self._item_finished(runtime)
 
-        self._finish(runtime, "completed")
-
-    def _finish(self, runtime: JobRuntime, status: str, error: str | None = None) -> None:
-        """统一收尾：更新状态、兜底条目状态、落库并从活动表移除。"""
+    def _mark_item(
+        self,
+        runtime: JobRuntime,
+        idx: int,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        """记录条目终态；已失败/已取消的条目不会被后续事件覆盖。"""
         with runtime.lock:
-            if status == "completed":
-                for item in runtime.items.values():
-                    if item.status not in ("failed",):
-                        item.status = "done"
-                        item.progress = 1.0
-                        item.speed = None
-                        item.eta = 0
-            elif status == "cancelled":
-                for item in runtime.items.values():
-                    if item.status in ("pending", "downloading", "processing"):
-                        item.status = "cancelled"
-                runtime.status = status
-            elif status == "failed":
-                for item in runtime.items.values():
-                    if item.status in ("pending", "downloading", "processing"):
-                        item.status = "failed"
-                        item.error = item.error or error
-            runtime.status = status
-            runtime.error = error
+            item = runtime.items.get(idx)
+            if item is None:
+                return
+            if item.status in ("failed", "cancelled") and status != item.status:
+                return
+            item.status = status
+            if status == "done":
+                item.progress = 1.0
+                item.error = None
+            elif error:
+                item.error = error
+            item.speed = None
+            item.eta = 0
+            runtime.progress = self._progress_locked(runtime)
+        self._maybe_flush(runtime)
+
+    def _item_finished(self, runtime: JobRuntime) -> None:
+        """每个条目结束后递减计数，全部结束时结算任务状态。"""
+        finalized = False
+        with runtime.lock:
+            runtime.pending -= 1
+            runtime.progress = self._progress_locked(runtime)
+            if runtime.pending <= 0 and runtime.status not in (
+                "completed",
+                "partial",
+                "failed",
+                "cancelled",
+            ):
+                statuses = [item.status for item in runtime.items.values()]
+                if runtime.cancel.is_set():
+                    final_status = "cancelled"
+                elif all(status == "done" for status in statuses):
+                    final_status = "completed"
+                elif any(status == "done" for status in statuses):
+                    final_status = "partial"
+                elif any(status == "failed" for status in statuses):
+                    final_status = "failed"
+                else:
+                    final_status = "cancelled"
+
+                runtime.status = final_status
+                runtime.finished_at = db.now_ts()
+                if final_status in ("failed", "partial"):
+                    runtime.error = next(
+                        (item.error for item in runtime.items.values() if item.error),
+                        "下载失败" if final_status == "failed" else None,
+                    )
+                finalized = True
+        if finalized:
+            self._flush(runtime)
+            with self._lock:
+                self._jobs.pop(runtime.id, None)
+
+    def _fail_pending(self, runtime: JobRuntime, message: str) -> None:
+        """调度失败时统一收尾。"""
+        runtime.cancel.set()
+        with runtime.lock:
+            for item in runtime.items.values():
+                if item.status in ("pending", "downloading", "processing"):
+                    item.status = "failed"
+                    item.error = item.error or message
+            runtime.status = "failed"
             runtime.finished_at = db.now_ts()
+            runtime.error = message
             runtime.progress = self._progress_locked(runtime)
         self._flush(runtime)
         with self._lock:
@@ -426,40 +493,16 @@ class JobManager:
         )
         return min(1.0, (completed + current) / total)
 
-    @staticmethod
-    def _resolve_index_locked(runtime: JobRuntime, info: dict) -> int | None:
-        raw = info.get("playlist_index")
-        try:
-            index = int(raw) if raw is not None else None
-        except (TypeError, ValueError):
-            index = None
-        if index is not None and index in runtime.items:
-            return index
-        if len(runtime.items) == 1:
-            return next(iter(runtime.items))
-        if runtime.current_idx in runtime.items:
-            return runtime.current_idx
-        for item in runtime.items.values():
-            if item.status in ("pending", "downloading", "processing"):
-                return item.idx
-        return None
-
-    def _on_progress(self, runtime: JobRuntime, data: dict) -> None:
+    def _on_progress(self, runtime: JobRuntime, idx: int, data: dict) -> None:
         """yt-dlp 进度回调；取消请求在这里生效。"""
         if runtime.cancel.is_set():
             raise DownloadCancelled("用户取消了下载")
 
-        info = data.get("info_dict") or {}
         status = data.get("status")
         with runtime.lock:
-            index = self._resolve_index_locked(runtime, info)
-            if index is None:
+            item = runtime.items.get(idx)
+            if item is None or item.status in ("failed", "cancelled"):
                 return
-            item = runtime.items.get(index)
-            if item is None:
-                return
-            runtime.current_idx = index
-
             if status == "downloading":
                 item.status = "downloading"
                 downloaded = data.get("downloaded_bytes")
@@ -470,6 +513,7 @@ class JobManager:
                 item.eta = data.get("eta")
                 if downloaded and total:
                     item.progress = min(1.0, float(downloaded) / float(total))
+                info = data.get("info_dict") or {}
                 if info.get("title"):
                     item.title = info["title"]
             elif status == "finished":
@@ -488,18 +532,15 @@ class JobManager:
             runtime.progress = self._progress_locked(runtime)
         self._maybe_flush(runtime)
 
-    def _on_postprocess(self, runtime: JobRuntime, data: dict) -> None:
-        """合并/移动完成后记录最终文件路径。"""
+    def _on_postprocess(self, runtime: JobRuntime, idx: int, data: dict) -> None:
+        """合并/移动完成后记录该条目的最终文件路径。"""
         if data.get("status") != "finished":
             return
         info = data.get("info_dict") or {}
         filepath = info.get("filepath")
         with runtime.lock:
-            index = self._resolve_index_locked(runtime, info)
-            if index is None:
-                return
-            item = runtime.items.get(index)
-            if item is None:
+            item = runtime.items.get(idx)
+            if item is None or item.status in ("failed", "cancelled"):
                 return
             if filepath:
                 try:
@@ -645,27 +686,25 @@ class JobManager:
     # ---------------------------------------------------------------- mutation
 
     def cancel(self, job_id: str) -> bool:
-        """请求取消；排队中的任务立即结束，运行中的任务在下一个进度回调中断。"""
+        """请求取消；进行中的下载在下一个进度回调中断。"""
         with self._lock:
-            runtime = self._jobs.get(job_id)
+            runtime = self._jobs.pop(job_id, None)
         if runtime is None:
             return False
 
         runtime.cancel.set()
         with runtime.lock:
-            queued = runtime.status == "queued"
-            if queued:
-                for item in runtime.items.values():
-                    if item.status in ("pending", "downloading", "processing"):
-                        item.status = "cancelled"
-                runtime.status = "cancelled"
-                runtime.finished_at = db.now_ts()
-                runtime.error = "已取消"
-                runtime.progress = self._progress_locked(runtime)
-        if queued:
-            self._flush(runtime)
-            with self._lock:
-                self._jobs.pop(runtime.id, None)
+            for item in runtime.items.values():
+                if item.status in ("pending", "downloading", "processing"):
+                    item.status = "cancelled"
+                    item.error = item.error or "已取消"
+                    item.speed = None
+                    item.eta = 0
+            runtime.status = "cancelled"
+            runtime.finished_at = db.now_ts()
+            runtime.error = "已取消"
+            runtime.progress = self._progress_locked(runtime)
+        self._flush(runtime)
         return True
 
     def delete_job(self, job_id: str) -> bool:
