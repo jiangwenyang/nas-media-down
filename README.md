@@ -6,6 +6,7 @@
 - 强制密码登录，会话存服务端
 - 播放列表勾选、列表内并行下载、失败条目单独重试、任务进度、历史记录、文件浏览与在线预览
 - 哔哩哔哩扫码登录，支持下载大会员专属清晰度
+- 追番/追剧：读取 B 站关注列表，订阅后自动下载新剧集，也可一次下载整季
 - yt-dlp + ffmpeg + Deno（YouTube 完整支持），随构建固定版本
 - 深色玻璃拟态界面，适配手机
 
@@ -60,6 +61,7 @@
 | `PORT` | `8080` | 对外端口 |
 | `MAX_CONCURRENT` | `2` | 同时下载的视频数（跨任务共享，播放列表内也会并行） |
 | `MAX_PLAYLIST_ITEMS` | `500` | 播放列表单次加载/下载上限 |
+| `BANGUMI_CHECK_INTERVAL` | `1800` | 追番/追剧自动检查间隔（秒），最小 60 |
 | `MERGE_FORMAT` | `mp4/mkv` | 合并容器优先级；能 mp4 就 mp4，否则无损 mkv |
 | `COOKIE_SECURE` | `false` | 通过 HTTPS 反向代理访问时设为 `true` |
 | `COOKIES_FILE` | 空 | 容器内 cookies.txt 路径，例如 `/data/cookies.txt` |
@@ -91,6 +93,20 @@
 - 登录态过期后页面会显示未登录，重新扫码即可；「退出登录」会删除该 Cookie 文件。
 - 已配置的全局 `COOKIES_FILE` 仍用于其他站点，不会被覆盖。
 
+## 追番 / 追剧
+
+1. 先在「账号」页扫码登录哔哩哔哩（关注列表需要登录态才能读取）。
+2. 打开「追番」页，在「番剧 / 追剧」之间切换，浏览自己的关注列表：
+   - **追更**：只跟踪后续更新，已在列表中的剧集不会下载。
+   - **下载全集**：订阅并立即把当前已发布的全部剧集加入下载队列。
+   - **选集下载**：打开剧集列表，勾选任意集数下载；已下载或排队中的剧集不可重复选择。
+3. 「正在追更」区域可查看下载进度、立即检查、手动下载全部、开关自动下载或取消追更。
+
+- 后台每隔 `BANGUMI_CHECK_INTERVAL` 秒检查一次（默认 30 分钟），发现新剧集后自动创建播放列表任务，按剧名分目录保存。
+- 每集的下载状态会与任务状态同步；失败可在「任务」页单独重试。
+- 自动下载只针对订阅之后的更新；重新开启自动下载不会补下关闭期间遗漏的剧集，可点「下载全部」补齐。
+- 付费/大会员专属剧集仍受账号权限限制；请遵守哔哩哔哩服务条款。
+
 ## 安全建议
 
 - 默认设计为**局域网使用**。如需公网访问，请放在 HTTPS 反向代理之后，并设置 `COOKIE_SECURE=true`。
@@ -114,9 +130,12 @@ docker compose up -d
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements-dev.txt
-ACCESS_PASSWORD=dev DOWNLOAD_DIR=./downloads DATA_DIR=./data \
-  .venv/bin/uvicorn app.main:app --app-dir backend --reload --port 8080
+cp .env.example .env          # 首次：至少填好 ACCESS_PASSWORD
+.venv/bin/uvicorn app.main:app --app-dir backend --reload --port 8080
 ```
+
+后端启动时会自动读取项目根目录的 `.env`（进程环境变量优先，docker-compose 用的是同一份）。
+本地开发不设置 `DOWNLOAD_DIR` / `DATA_DIR` 时，默认使用仓库下的 `downloads/` 和 `data/`。
 
 前端（Vite 会把 `/api` 代理到 `127.0.0.1:8080`）：
 

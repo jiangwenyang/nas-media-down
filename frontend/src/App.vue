@@ -1,20 +1,22 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
-import { Download, FolderOpen, ListChecks, LogOut, UserRound } from 'lucide-vue-next'
+import { Download, FolderOpen, ListChecks, LogOut, UserRound, Clapperboard } from 'lucide-vue-next'
 import { useAuth } from './composables/useAuth'
 import { useJobs } from './composables/useJobs'
 import LoginView from './components/LoginView.vue'
 import DownloadView from './components/DownloadView.vue'
+import BangumiView from './components/BangumiView.vue'
 import JobsView from './components/JobsView.vue'
 import FileBrowser from './components/FileBrowser.vue'
 import AccountView from './components/AccountView.vue'
 import ToastHost from './components/ToastHost.vue'
 
-type Tab = 'download' | 'jobs' | 'files' | 'account'
+type Tab = 'download' | 'bangumi' | 'jobs' | 'files' | 'account'
 
 const tabs: Array<{ id: Tab; label: string; icon: Component }> = [
   { id: 'download', label: '下载', icon: Download },
+  { id: 'bangumi', label: '追番', icon: Clapperboard },
   { id: 'jobs', label: '任务', icon: ListChecks },
   { id: 'files', label: '文件', icon: FolderOpen },
   { id: 'account', label: '账号', icon: UserRound },
@@ -103,6 +105,10 @@ async function handleLogout(): Promise<void> {
       <main class="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
         <div :key="activeTab" class="animate-float-in">
           <DownloadView v-if="activeTab === 'download'" @open-jobs="activeTab = 'jobs'" />
+          <BangumiView
+            v-else-if="activeTab === 'bangumi'"
+            @open-account="activeTab = 'account'"
+          />
           <JobsView v-else-if="activeTab === 'jobs'" />
           <FileBrowser v-else-if="activeTab === 'files'" />
           <AccountView v-else />

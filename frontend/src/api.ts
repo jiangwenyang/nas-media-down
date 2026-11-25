@@ -1,4 +1,11 @@
 import type {
+  BangumiCheckResult,
+  BangumiDownloadAllResult,
+  BangumiDownloadResult,
+  BangumiFollowPage,
+  BangumiSeasonDetail,
+  BangumiSubscribeResult,
+  BangumiSubscription,
   BilibiliPoll,
   BilibiliQrCode,
   BilibiliStatus,
@@ -104,4 +111,45 @@ export const api = {
   bilibiliStatus: () => request<BilibiliStatus>('/bilibili/status'),
   bilibiliLogout: () =>
     request<{ ok: boolean }>('/bilibili/logout', { method: 'POST' }),
+  bangumiFollow: (type: 1 | 2, page = 1) =>
+    request<BangumiFollowPage>(`/bangumi/follow?type=${type}&page=${page}`),
+  bangumiSubscriptions: () =>
+    request<{ subscriptions: BangumiSubscription[] }>('/bangumi/subscriptions'),
+  bangumiSubscribe: (payload: {
+    season_id: number
+    media_type: 1 | 2
+    mode: 'watch' | 'all'
+  }) =>
+    request<BangumiSubscribeResult>('/bangumi/subscriptions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  bangumiUpdateSubscription: (
+    id: string,
+    payload: { enabled?: boolean; auto_download?: boolean },
+  ) =>
+    request<BangumiSubscription>(`/bangumi/subscriptions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  bangumiDeleteSubscription: (id: string) =>
+    request<void>(`/bangumi/subscriptions/${id}`, { method: 'DELETE' }),
+  bangumiCheckSubscription: (id: string) =>
+    request<BangumiCheckResult>(`/bangumi/subscriptions/${id}/check`, {
+      method: 'POST',
+    }),
+  bangumiDownloadAll: (id: string) =>
+    request<BangumiDownloadAllResult>(`/bangumi/subscriptions/${id}/download-all`, {
+      method: 'POST',
+    }),
+  bangumiSeason: (seasonId: number) =>
+    request<BangumiSeasonDetail>(`/bangumi/season/${seasonId}`),
+  bangumiDownloadEpisodes: (payload: {
+    season_id: number
+    episode_indices: number[]
+  }) =>
+    request<BangumiDownloadResult>('/bangumi/download', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 }

@@ -50,6 +50,19 @@ def cookie_path(settings: Settings) -> Path:
     return settings.data_dir / BILIBILI_COOKIE_FILENAME
 
 
+def cookie_values(settings: Settings) -> dict[str, str]:
+    """读取扫码登录保存的 Cookie，供 B 站 API 请求使用。"""
+    path = cookie_path(settings)
+    if not path.exists():
+        return {}
+    return {name: value for name, value, _ in _read_cookie_entries(path)}
+
+
+def self_uid(settings: Settings) -> str | None:
+    """从登录 Cookie 中读取当前账号的 UID。"""
+    return cookie_values(settings).get("DedeUserID") or None
+
+
 def is_bilibili_url(url: str) -> bool:
     """判断 URL 是否属于哔哩哔哩域名。"""
     host = (urlparse(url).hostname or "").lower()

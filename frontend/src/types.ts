@@ -129,3 +129,100 @@ export interface BilibiliStatus {
   vip: boolean
   expires_at: number | null
 }
+
+export interface BangumiNewEp {
+  title: string | null
+  pub_time: string | null
+}
+
+export interface BangumiFollowItem {
+  season_id: number
+  media_id: number | null
+  type: 1 | 2
+  title: string
+  cover: string | null
+  season_title: string | null
+  total_count: number
+  is_finish: boolean
+  new_ep: BangumiNewEp | null
+  url: string
+  subscribed: boolean
+  subscription_id: string | null
+}
+
+export interface BangumiFollowPage {
+  items: BangumiFollowItem[]
+  page: number
+  total: number
+  has_more: boolean
+}
+
+export interface BangumiSubscription {
+  id: string
+  season_id: number
+  media_id: number | null
+  type: 1 | 2
+  title: string
+  cover: string | null
+  url: string
+  auto_download: boolean
+  enabled: boolean
+  last_check_at: number | null
+  last_error: string | null
+  created_at: number
+  episode_count: number
+  done_count: number
+  queued_count: number
+  failed_count: number
+  skipped_count: number
+  latest_title: string | null
+  latest_status: 'skipped' | 'queued' | 'done' | 'failed' | null
+}
+
+export interface BangumiSubscribeResult {
+  subscription: BangumiSubscription | null
+  job_count: number
+  error: string | null
+}
+
+export interface BangumiCheckResult {
+  checked?: boolean
+  busy?: boolean
+  new_episodes: number
+  job_count: number
+  error?: string | null
+}
+
+export interface BangumiDownloadAllResult {
+  episode_count: number
+  job_count: number
+  error: string | null
+  subscription: BangumiSubscription | null
+}
+
+export type BangumiEpisodeStatus = 'skipped' | 'queued' | 'done' | 'failed' | null
+
+export interface BangumiSeasonEpisode {
+  ep_id: number
+  idx: number
+  title: string
+  long_title: string | null
+  duration: number | null
+  cover: string | null
+  pub_time: number | null
+  url: string
+  status: BangumiEpisodeStatus
+}
+
+export interface BangumiSeasonDetail {
+  season_id: number
+  media_id: number | null
+  title: string
+  season_title: string | null
+  cover: string | null
+  total_count: number
+  episodes: BangumiSeasonEpisode[]
+  subscribed: boolean
+}
+
+export type BangumiDownloadResult = BangumiDownloadAllResult

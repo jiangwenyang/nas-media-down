@@ -56,9 +56,38 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_agent TEXT
 );
 
+CREATE TABLE IF NOT EXISTS bangumi_subscriptions (
+    id TEXT PRIMARY KEY,
+    season_id INTEGER NOT NULL UNIQUE,
+    media_id INTEGER,
+    type INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    cover TEXT,
+    url TEXT NOT NULL,
+    auto_download INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_check_at INTEGER,
+    last_error TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS bangumi_episodes (
+    subscription_id TEXT NOT NULL REFERENCES bangumi_subscriptions(id) ON DELETE CASCADE,
+    ep_id INTEGER NOT NULL,
+    idx INTEGER NOT NULL,
+    title TEXT,
+    duration REAL,
+    cover TEXT,
+    status TEXT NOT NULL,
+    job_id TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (subscription_id, ep_id)
+);
+
 CREATE INDEX IF NOT EXISTS ix_jobs_created ON jobs(created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_items_job ON job_items(job_id, idx);
 CREATE INDEX IF NOT EXISTS ix_sessions_expiry ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS ix_bangumi_episodes_sub ON bangumi_episodes(subscription_id, idx);
 """
 
 

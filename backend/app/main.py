@@ -13,11 +13,17 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, 
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, bilibili, db
+from . import auth, bangumi, bilibili, db
 from .config import APP_VERSION, ConfigError, load_settings
 from .downloader import JobCreateError, JobManager
 from .files import FileAccessError, list_dir, resolve_path
-from .models import JobCreateBody, ProbeBody
+from .models import (
+    BangumiDownloadBody,
+    BangumiSubscribeBody,
+    BangumiUpdateBody,
+    JobCreateBody,
+    ProbeBody,
+)
 from .probe import ProbeError, probe_url
 
 logger = logging.getLogger(__name__)
@@ -46,10 +52,13 @@ async def lifespan(app: FastAPI):
     app.state.db_path = db_path
     app.state.login_limiter = auth.LoginRateLimiter()
     app.state.jobs = JobManager(settings)
+    app.state.bangumi = bangumi.BangumiManager(settings, app.state.jobs)
+    app.state.bangumi.start()
     logger.info("服务已启动，下载目录：%s", settings.download_dir)
     try:
         yield
     finally:
+        app.state.bangumi.stop()
         app.state.jobs.shutdown()
 
 
@@ -224,6 +233,111 @@ def bilibili_logout(request: Request) -> dict[str, bool]:
     """删除本地哔哩哔哩登录 Cookie。"""
     bilibili.logout(request.app.state.settings)
     return {"ok": True}
+
+
+def _bangumi_error(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=502, detail=str(exc))
+
+
+@api.get("/bangumi/follow")
+def bangumi_follow(
+    request: Request,
+    media_type: int = Query(default=1, alias="type", ge=1, le=2),
+    page: int = Query(default=1, ge=1, le=100),
+    vmid: str | None = Query(default=None, pattern=r"^\d{1,20}$"),
+) -> dict:
+    """读取当前账号的追番（type=1）或追剧（type=2）列表。"""
+    try:
+        data = bangumi.fetch_follow_list(
+            request.app.state.settings, media_type, page, vmid
+        )
+    except bangumi.BangumiError as exc:
+        raise _bangumi_error(exc) from exc
+    subscriptions = request.app.state.bangumi.subscriptions_by_season()
+    for item in data["items"]:
+        item["subscribed"] = item["season_id"] in subscriptions
+        item["subscription_id"] = subscriptions.get(item["season_id"])
+    return data
+
+
+@api.get("/bangumi/season/{season_id}")
+def bangumi_season(season_id: int, request: Request) -> dict:
+    """返回剧集列表；已订阅时附带每集下载状态。"""
+    if season_id <= 0:
+        raise HTTPException(status_code=400, detail="无效的剧集编号")
+    try:
+        return request.app.state.bangumi.season_detail(season_id)
+    except bangumi.BangumiError as exc:
+        raise _bangumi_error(exc) from exc
+
+
+@api.post("/bangumi/download")
+def bangumi_download_episodes(body: BangumiDownloadBody, request: Request) -> dict:
+    """下载选中的剧集；已订阅的剧集会同步更新下载状态。"""
+    try:
+        return request.app.state.bangumi.download_episodes(
+            body.season_id, body.episode_indices
+        )
+    except bangumi.BangumiError as exc:
+        raise _bangumi_error(exc) from exc
+
+
+@api.get("/bangumi/subscriptions")
+def bangumi_subscriptions(request: Request) -> dict:
+    """返回全部追番订阅及下载统计。"""
+    return {"subscriptions": request.app.state.bangumi.list_subscriptions()}
+
+
+@api.post("/bangumi/subscriptions")
+def bangumi_subscribe(body: BangumiSubscribeBody, request: Request) -> dict:
+    """订阅一部剧；mode=all 时同时下载已发布剧集。"""
+    try:
+        return request.app.state.bangumi.subscribe(
+            body.media_type, body.season_id, body.mode
+        )
+    except bangumi.BangumiError as exc:
+        raise _bangumi_error(exc) from exc
+
+
+@api.patch("/bangumi/subscriptions/{sub_id}")
+def bangumi_update_subscription(
+    sub_id: str, body: BangumiUpdateBody, request: Request
+) -> dict:
+    """切换订阅的启用状态或自动下载开关。"""
+    data = request.app.state.bangumi.update_subscription(
+        sub_id, body.enabled, body.auto_download
+    )
+    if data is None:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    return data
+
+
+@api.delete("/bangumi/subscriptions/{sub_id}", status_code=204)
+def bangumi_delete_subscription(sub_id: str, request: Request) -> Response:
+    """取消订阅（不删除已下载文件）。"""
+    if not request.app.state.bangumi.delete_subscription(sub_id):
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    return Response(status_code=204)
+
+
+@api.post("/bangumi/subscriptions/{sub_id}/check")
+def bangumi_check_subscription(sub_id: str, request: Request) -> dict:
+    """立即检查一部剧的更新。"""
+    data = request.app.state.bangumi.check(sub_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="订阅不存在")
+    return data
+
+
+@api.post("/bangumi/subscriptions/{sub_id}/download-all")
+def bangumi_download_all(sub_id: str, request: Request) -> dict:
+    """下载该剧当前已发布的全部剧集。"""
+    try:
+        return request.app.state.bangumi.download_all(sub_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="订阅不存在") from exc
+    except bangumi.BangumiError as exc:
+        raise _bangumi_error(exc) from exc
 
 
 app.include_router(api)
