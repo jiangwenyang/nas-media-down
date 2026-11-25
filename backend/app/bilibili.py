@@ -73,11 +73,14 @@ def _get_json(url: str) -> dict:
     try:
         response = requests.get(url, headers=HEADERS, timeout=15)
         response.raise_for_status()
-        return response.json()
+        payload = response.json()
     except requests.RequestException as exc:
         raise BilibiliError(f"无法连接哔哩哔哩：{exc}") from exc
     except ValueError as exc:
         raise BilibiliError("哔哩哔哩返回了无效响应") from exc
+    if not isinstance(payload, dict):
+        raise BilibiliError("哔哩哔哩返回了无效响应")
+    return payload
 
 
 def generate_qrcode() -> dict[str, str]:
@@ -107,7 +110,11 @@ def poll_qrcode(settings: Settings, key: str) -> dict:
     except ValueError as exc:
         raise BilibiliError("哔哩哔哩返回了无效响应") from exc
 
-    data = payload.get("data") or {}
+    if not isinstance(payload, dict):
+        raise BilibiliError("哔哩哔哩返回了无效响应")
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        data = {}
     try:
         code = int(data.get("code", -1))
     except (TypeError, ValueError):
@@ -124,7 +131,7 @@ def poll_qrcode(settings: Settings, key: str) -> dict:
         return result
 
     cookies = _collect_cookies(
-        str(data.get("url") or ""), response.headers.getlist("Set-Cookie")
+        str(data.get("url") or ""), _set_cookie_headers(response)
     )
     if "SESSDATA" not in cookies:
         raise BilibiliError("登录成功但未取得 SESSDATA，请重试")
@@ -163,7 +170,11 @@ def session_status(settings: Settings) -> dict:
         # 网络暂时不可用时保留“已保存登录信息”的状态，不强制重新扫码
         return {"logged_in": True, "uname": None, "vip": False, "expires_at": expires_at}
 
-    data = payload.get("data") or {}
+    if not isinstance(payload, dict):
+        return {"logged_in": True, "uname": None, "vip": False, "expires_at": expires_at}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        data = {}
     code = payload.get("code")
     if code == -101:
         return {"logged_in": False, "uname": None, "vip": False, "expires_at": None}
@@ -189,6 +200,15 @@ def logout(settings: Settings) -> None:
 
 def _clean_cookie_value(value: str) -> str:
     return value.replace("\t", "").replace("\r", "").replace("\n", "")
+
+
+def _set_cookie_headers(response: requests.Response) -> list[str]:
+    """读取响应中的多条 Set-Cookie；requests 的 headers 不提供 getlist。"""
+    raw_headers = getattr(response.raw, "headers", None)
+    if raw_headers is not None and hasattr(raw_headers, "getlist"):
+        return list(raw_headers.getlist("Set-Cookie"))
+    value = response.headers.get("Set-Cookie")
+    return [value] if value else []
 
 
 def _collect_cookies(url: str, set_cookie_headers: list[str]) -> dict[str, dict]:
@@ -261,10 +281,13 @@ def _write_cookies(settings: Settings, cookies: dict[str, dict]) -> None:
             )
         )
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    os.chmod(tmp, 0o600)
-    tmp.replace(path)
-    os.chmod(path, 0o600)
+    try:
+        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        tmp.replace(path)
+        os.chmod(path, 0o600)
+    except OSError as exc:
+        raise BilibiliError(f"无法保存登录 Cookie：{exc}") from exc
 
 
 def _read_cookie_entries(path: Path) -> list[tuple[str, str, int]]:
