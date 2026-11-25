@@ -174,7 +174,12 @@ struct EpisodePickerView: View {
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
 
-                if let style {
+                if episode.downloaded == true {
+                    Text("已下载")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Theme.success)
+                        .frame(width: 52, alignment: .trailing)
+                } else if let style {
                     Text(style.label)
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(style.tint)
@@ -190,7 +195,9 @@ struct EpisodePickerView: View {
     }
 
     private func isSelectable(_ episode: BangumiSeasonEpisode) -> Bool {
-        episode.status != .done && episode.status != .queued
+        episode.downloaded != true
+            && episode.status != .done
+            && episode.status != .queued
     }
 
     private func toggle(_ index: Int) {

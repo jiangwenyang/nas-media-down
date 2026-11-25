@@ -155,7 +155,13 @@ async function downloadSelected(payload: { indices: number[] }): Promise<void> {
       episode_indices: payload.indices,
     })
     if (result.job_count > 0) {
-      push(`已加入下载队列：${result.episode_count} 集`, 'success')
+      const skipped = result.skipped_count ?? 0
+      push(
+        skipped > 0
+          ? `已加入下载队列：${result.episode_count} 集，跳过 ${skipped} 集已下载`
+          : `已加入下载队列：${result.episode_count} 集`,
+        'success',
+      )
       episodeTarget.value = null
     } else if (result.error) {
       push(result.error, 'error')

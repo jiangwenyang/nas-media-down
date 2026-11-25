@@ -548,7 +548,11 @@ struct BangumiView: View {
         let api = try app.requireAPI()
         let result = try await api.bangumiDownloadEpisodes(seasonId: seasonId, indices: indices)
         if result.jobCount > 0 {
-            app.showToast("已加入下载队列：\(result.episodeCount) 集", style: .success)
+            let skipped = result.skippedCount ?? 0
+            let message = skipped > 0
+                ? "已加入下载队列：\(result.episodeCount) 集，跳过 \(skipped) 集已下载"
+                : "已加入下载队列：\(result.episodeCount) 集"
+            app.showToast(message, style: .success)
         } else if let error = result.error {
             throw APIError(status: 0, message: error)
         } else {

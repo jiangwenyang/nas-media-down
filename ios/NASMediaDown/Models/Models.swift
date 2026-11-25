@@ -394,6 +394,7 @@ struct BangumiCheckResult: Codable {
 struct BangumiDownloadResult: Codable {
     let episodeCount: Int
     let jobCount: Int
+    let skippedCount: Int?
     let error: String?
     let subscription: BangumiSubscription?
 }
@@ -408,6 +409,7 @@ struct BangumiSeasonEpisode: Codable, Identifiable, Hashable {
     let pubTime: Double?
     let url: String
     let status: BangumiEpisodeStatus?
+    let downloaded: Bool?
 
     var id: Int { idx }
 }

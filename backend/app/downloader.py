@@ -687,6 +687,22 @@ class JobManager:
             "items": [self._item_row_payload(dict(item)) for item in item_rows],
         }
 
+    def active_indices(self, url: str) -> set[int]:
+        """返回指定 URL 正在排队或下载中的条目序号，用于避免重复入队。"""
+        with self._lock:
+            runtimes = [
+                runtime for runtime in self._jobs.values() if runtime.url == url
+            ]
+        indices: set[int] = set()
+        for runtime in runtimes:
+            with runtime.lock:
+                indices.update(
+                    item.idx
+                    for item in runtime.items.values()
+                    if item.status in ("pending", "downloading", "processing")
+                )
+        return indices
+
     # ---------------------------------------------------------------- mutation
 
     def cancel(self, job_id: str) -> bool:

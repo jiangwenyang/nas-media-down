@@ -50,9 +50,9 @@ const allSelected = computed(
     selectableFiltered.value.every((ep) => selected.value.has(ep.idx)),
 )
 
-/** 已完成或排队中的剧集不可重复选择。 */
-function isSelectable(ep: { status: BangumiEpisodeStatus }): boolean {
-  return ep.status !== 'done' && ep.status !== 'queued'
+/** 已完成、已下载或排队中的剧集不可重复选择。 */
+function isSelectable(ep: { status: BangumiEpisodeStatus; downloaded?: boolean }): boolean {
+  return ep.downloaded !== true && ep.status !== 'done' && ep.status !== 'queued'
 }
 
 /** 返回剧集状态的展示文案与颜色。 */
@@ -216,8 +216,11 @@ onUnmounted(() => {
               <span class="shrink-0 text-[11px] text-slate-500">
                 {{ formatDuration(ep.duration) }}
               </span>
+              <span v-if="ep.downloaded" class="w-14 shrink-0 text-right text-[11px] text-emerald-300">
+                已下载
+              </span>
               <span
-                v-if="statusMeta(ep.status)"
+                v-else-if="statusMeta(ep.status)"
                 class="w-14 shrink-0 text-right text-[11px]"
                 :class="statusMeta(ep.status)?.cls"
               >

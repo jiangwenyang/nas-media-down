@@ -157,6 +157,10 @@ class FakeJobs:
     def __init__(self, db_path: Path | None = None) -> None:
         self.created: list = []
         self.db_path = db_path
+        self.active: set[int] = set()
+
+    def active_indices(self, url: str) -> set[int]:  # noqa: ARG002 - 与 JobManager 签名保持一致
+        return set(self.active)
 
     def create(self, body):  # noqa: ANN001 - 与 JobManager 签名保持一致
         self.created.append(body)
@@ -373,3 +377,108 @@ def test_download_selected_episodes_updates_subscription(
     assert detail["subscribed"] is True
     statuses = {ep["idx"]: ep["status"] for ep in detail["episodes"]}
     assert statuses == {1: "queued", 2: "queued", 3: "skipped"}
+
+
+def test_season_detail_marks_downloaded_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = make_settings(tmp_path)
+    db.init_db(settings.data_dir / "nas-media-down.db")
+    jobs = FakeJobs(settings.data_dir / "nas-media-down.db")
+    manager = bangumi.BangumiManager(settings, jobs)  # type: ignore[arg-type]
+
+    season = {
+        "season_id": 21,
+        "media_id": None,
+        "title": "已下载标记",
+        "cover": None,
+        "total_count": 3,
+        "episodes": [episode(601, 1), episode(602, 2), episode(603, 3)],
+    }
+    monkeypatch.setattr(bangumi, "fetch_season", lambda s, sid: season)
+
+    folder = settings.download_dir / "已下载标记"
+    folder.mkdir(parents=True)
+    (folder / "1 第1话 [601].mkv").write_bytes(b"media")
+    (folder / "2 第2话 [602].mkv.part").write_bytes(b"partial")
+
+    detail = manager.season_detail(21)
+
+    flags = {ep["idx"]: ep["downloaded"] for ep in detail["episodes"]}
+    assert flags == {1: True, 2: False, 3: False}
+
+
+def test_season_detail_marks_downloaded_from_jobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = make_settings(tmp_path)
+    db_path = settings.data_dir / "nas-media-down.db"
+    db.init_db(db_path)
+    jobs = FakeJobs(db_path)
+    manager = bangumi.BangumiManager(settings, jobs)  # type: ignore[arg-type]
+
+    season = {
+        "season_id": 22,
+        "media_id": None,
+        "title": "任务记录标记",
+        "cover": None,
+        "total_count": 2,
+        "episodes": [episode(611, 1), episode(612, 2)],
+    }
+    monkeypatch.setattr(bangumi, "fetch_season", lambda s, sid: season)
+
+    folder = settings.download_dir / "其它目录名"
+    folder.mkdir(parents=True)
+    (folder / "2 第2话 [612].mkv").write_bytes(b"media")
+    with db.session(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO jobs (id, url, kind, title, status, progress, created_at)
+            VALUES ('jobx', ?, 'playlist', '任务记录标记', 'completed', 1, ?)
+            """,
+            ("https://www.bilibili.com/bangumi/play/ss22", db.now_ts()),
+        )
+        conn.execute(
+            """
+            INSERT INTO job_items (job_id, idx, title, status, progress, filename)
+            VALUES ('jobx', 2, '第2话', 'done', 1, '其它目录名/2 第2话 [612].mkv')
+            """
+        )
+
+    detail = manager.season_detail(22)
+
+    flags = {ep["idx"]: ep["downloaded"] for ep in detail["episodes"]}
+    assert flags == {1: False, 2: True}
+
+
+def test_download_episodes_skips_downloaded_and_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = make_settings(tmp_path)
+    db.init_db(settings.data_dir / "nas-media-down.db")
+    jobs = FakeJobs(settings.data_dir / "nas-media-down.db")
+    manager = bangumi.BangumiManager(settings, jobs)  # type: ignore[arg-type]
+
+    season = {
+        "season_id": 23,
+        "media_id": None,
+        "title": "跳过已下载",
+        "cover": None,
+        "total_count": 4,
+        "episodes": [episode(621 + i, i + 1) for i in range(4)],
+    }
+    monkeypatch.setattr(bangumi, "fetch_season", lambda s, sid: season)
+
+    folder = settings.download_dir / "跳过已下载"
+    folder.mkdir(parents=True)
+    (folder / "1 第1话 [621].mkv").write_bytes(b"media")
+    jobs.active.add(2)
+
+    result = manager.download_episodes(23, [1, 2, 3])
+
+    assert result["episode_count"] == 1
+    assert result["skipped_count"] == 2
+    assert [entry.index for entry in jobs.created[0].entries] == [3]
+
+    with pytest.raises(bangumi.BangumiError, match="已下载或正在下载"):
+        manager.download_episodes(23, [1])

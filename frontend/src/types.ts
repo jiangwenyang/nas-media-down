@@ -201,6 +201,7 @@ export interface BangumiCheckResult {
 export interface BangumiDownloadAllResult {
   episode_count: number
   job_count: number
+  skipped_count?: number
   error: string | null
   subscription: BangumiSubscription | null
 }
@@ -217,6 +218,7 @@ export interface BangumiSeasonEpisode {
   pub_time: number | null
   url: string
   status: BangumiEpisodeStatus
+  downloaded?: boolean
 }
 
 export interface BangumiSeasonDetail {

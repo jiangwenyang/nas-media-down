@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import sqlite3
 import threading
 import time
@@ -13,7 +15,7 @@ import requests
 
 from . import bilibili, db
 from .config import Settings
-from .downloader import JobCreateError, JobManager
+from .downloader import JobCreateError, JobManager, sanitize_filename
 from .models import JobCreateBody, JobItemInput
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,9 @@ PAGE_SIZE = 24
 JOB_CHUNK_SIZE = 50
 HTTP_TIMEOUT = 20
 PUBLISH_GRACE = 60
+
+FILE_ID_PATTERN = re.compile(r"\[(\d+)\]")
+TEMP_SUFFIXES = (".part", ".ytdl", ".temp")
 
 STATUS_QUERIES = """
     SELECT subscription_id,
@@ -46,6 +51,20 @@ def _https(url: str | None) -> str | None:
     if not url:
         return None
     return url.replace("http://", "https://", 1) if url.startswith("http://") else url
+
+
+def _season_url(season_id: int) -> str:
+    """剧集详情页地址，同时也是该季下载任务使用的 URL。"""
+    return f"https://www.bilibili.com/bangumi/play/ss{int(season_id)}"
+
+
+def _episode_ids_in(name: str, wanted: set[int]) -> set[int]:
+    """从文件名中提取 `[ep_id]` 标记，仅返回关注范围内的剧集。"""
+    return {
+        int(match.group(1))
+        for match in FILE_ID_PATTERN.finditer(name)
+        if int(match.group(1)) in wanted
+    }
 
 
 def _api_message(code: Any, message: Any) -> str:
@@ -462,11 +481,15 @@ class BangumiManager:
                 self._record_episodes(sub_id, missing, "skipped")
                 known = self._episode_rows(sub_id)
 
+            downloaded = self._downloaded_episode_ids(season)
+            active = self.jobs.active_indices(sub["url"])
             targets = [
                 ep
                 for ep in season["episodes"]
                 if known.get(ep["ep_id"], {}).get("status")
                 in (None, "skipped", "failed")
+                and int(ep["ep_id"]) not in downloaded
+                and int(ep["idx"]) not in active
             ]
             result = self._enqueue_episodes(sub, targets)
             self._touch_subscription(
@@ -482,7 +505,7 @@ class BangumiManager:
             lock.release()
 
     def season_detail(self, season_id: int) -> dict:
-        """返回剧集列表；已订阅时附带每集的下载状态。"""
+        """返回剧集列表；附带每集下载状态与是否已下载文件。"""
         season = fetch_season(self.settings, season_id)
         sub = self._subscription_by_season(season_id)
         statuses: dict[int, str] = {}
@@ -492,30 +515,47 @@ class BangumiManager:
                 ep_id: str(row["status"])
                 for ep_id, row in self._episode_rows(sub["id"]).items()
             }
+        downloaded = self._downloaded_episode_ids(season)
         for ep in season["episodes"]:
-            ep["status"] = statuses.get(ep["ep_id"])
+            ep_id = int(ep["ep_id"])
+            status = statuses.get(ep_id)
+            ep["status"] = status
+            ep["downloaded"] = status == "done" or ep_id in downloaded
         season["subscribed"] = sub is not None
         return season
 
     def download_episodes(self, season_id: int, indices: list[int]) -> dict:
-        """按剧集序号下载选中的剧集；未订阅时直接创建任务。"""
+        """按剧集序号下载选中的剧集；已下载或排队中的剧集会被跳过。"""
         season = fetch_season(self.settings, season_id)
         by_idx = {int(ep["idx"]): ep for ep in season["episodes"]}
         selected = [by_idx[idx] for idx in sorted(set(indices)) if idx in by_idx]
         if not selected:
             raise BangumiError("所选剧集不存在或尚未发布")
 
+        downloaded = self._downloaded_episode_ids(season)
+        active = self.jobs.active_indices(_season_url(season_id))
+        skipped = 0
+        candidates: list[dict] = []
+        for ep in selected:
+            if int(ep["ep_id"]) in downloaded or int(ep["idx"]) in active:
+                skipped += 1
+            else:
+                candidates.append(ep)
+        if not candidates:
+            raise BangumiError("所选剧集已下载或正在下载")
+
         sub = self._subscription_by_season(season_id)
         if sub is None:
             pseudo = {
-                "url": f"https://www.bilibili.com/bangumi/play/ss{season_id}",
+                "url": _season_url(season_id),
                 "title": season["title"],
                 "season_id": season_id,
             }
-            result = self._enqueue_episodes(pseudo, selected)
+            result = self._enqueue_episodes(pseudo, candidates)
             return {
-                "episode_count": len(selected),
+                "episode_count": len(candidates),
                 "job_count": result["job_count"],
+                "skipped_count": skipped,
                 "error": result.get("error"),
                 "subscription": None,
             }
@@ -528,9 +568,10 @@ class BangumiManager:
             known = self._episode_rows(sub["id"])
             available = [
                 ep
-                for ep in selected
+                for ep in candidates
                 if known.get(ep["ep_id"], {}).get("status") not in ("done", "queued")
             ]
+            skipped += len(candidates) - len(available)
             if not available:
                 raise BangumiError("所选剧集已下载或正在下载")
 
@@ -544,6 +585,7 @@ class BangumiManager:
             return {
                 "episode_count": len(available),
                 "job_count": result["job_count"],
+                "skipped_count": skipped,
                 "error": result.get("error"),
                 "subscription": self._payload_for(sub["id"]),
             }
@@ -706,6 +748,42 @@ class BangumiManager:
                 (sub_id,),
             ).fetchall()
         return {int(row["ep_id"]): dict(row) for row in rows}
+
+    def _downloaded_episode_ids(self, season: dict) -> set[int]:
+        """识别已下载的剧集：下载目录中的同名文件与已完成任务记录都算数。"""
+        wanted = {int(ep["ep_id"]) for ep in season["episodes"]}
+        if not wanted:
+            return set()
+
+        found: set[int] = set()
+        folder = self.settings.download_dir / sanitize_filename(season["title"])
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            names = []
+        for name in names:
+            if not name.endswith(TEMP_SUFFIXES):
+                found |= _episode_ids_in(name, wanted - found)
+
+        if len(found) < len(wanted):
+            with db.session(self.db_path) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT i.filename AS filename
+                      FROM job_items i
+                      JOIN jobs j ON j.id = i.job_id
+                     WHERE i.status = 'done'
+                       AND i.filename IS NOT NULL
+                       AND j.url = ?
+                    """,
+                    (_season_url(season["season_id"]),),
+                ).fetchall()
+            for row in rows:
+                name = str(row["filename"])
+                if not (self.settings.download_dir / name).exists():
+                    continue
+                found |= _episode_ids_in(name, wanted - found)
+        return found
 
     def _reconcile_jobs(self, sub_id: str) -> None:
         """把剧集状态与对应下载任务同步，包括任务页里的手动重试。"""
