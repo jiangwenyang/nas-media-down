@@ -241,13 +241,40 @@ struct FileEntry: Codable, Identifiable, Hashable {
 
     var id: String { path }
 
-    var isPreviewable: Bool {
-        let mime = mime ?? ""
-        return mime.hasPrefix("video/")
-            || mime.hasPrefix("audio/")
-            || mime.hasPrefix("image/")
-            || mime == "application/pdf"
+    var fileExtension: String {
+        (name as NSString).pathExtension.lowercased()
     }
+
+    var isVideo: Bool {
+        if (mime ?? "").hasPrefix("video/") { return true }
+        return Self.videoExtensions.contains(fileExtension)
+    }
+
+    var isAudio: Bool {
+        if (mime ?? "").hasPrefix("audio/") { return true }
+        return Self.audioExtensions.contains(fileExtension)
+    }
+
+    var isMedia: Bool { isVideo || isAudio }
+
+    var isImage: Bool {
+        if (mime ?? "").hasPrefix("image/") { return true }
+        return Self.imageExtensions.contains(fileExtension)
+    }
+
+    var isPDF: Bool { mime == "application/pdf" || fileExtension == "pdf" }
+
+    var isPreviewable: Bool { isMedia || isImage || isPDF }
+
+    private static let videoExtensions: Set<String> = [
+        "mp4", "m4v", "mov", "mkv", "webm", "avi", "flv", "ts", "wmv", "3gp",
+    ]
+    private static let audioExtensions: Set<String> = [
+        "mp3", "m4a", "aac", "flac", "wav", "opus", "ogg", "oga", "aiff", "alac",
+    ]
+    private static let imageExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp", "tiff",
+    ]
 }
 
 struct FileListing: Codable {

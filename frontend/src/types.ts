@@ -97,6 +97,11 @@ export interface FileListing {
   entries: FileEntry[]
 }
 
+export interface ShareLink {
+  token: string
+  expires_at: number
+}
+
 export interface CreateJobPayload {
   url: string
   kind: 'video' | 'playlist'

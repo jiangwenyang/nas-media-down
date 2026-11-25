@@ -1,31 +1,29 @@
 import SwiftUI
+import UIKit
 
-/// 文件预览：视频、音频、图片、PDF 与通用下载。
+/// 统一文件预览：媒体通过 VidHub 打开或复制链接，图片与 PDF 保持内嵌预览。
 struct FilePreviewView: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
 
     let entry: FileEntry
 
-    @State private var shareItem: ShareItem?
-    @State private var downloading = false
-    @State private var preparingLink = false
-    @State private var playbackLink: PlaybackLink?
+    @State private var shareLink: ShareLink?
+    @State private var preparing = false
+    @State private var error: String?
+    @State private var copied = false
 
     private enum Kind {
-        case video
-        case audio
+        case media
         case image
         case pdf
         case other
     }
 
     private var kind: Kind {
-        let mime = entry.mime ?? ""
-        if mime.hasPrefix("video/") { return .video }
-        if mime.hasPrefix("audio/") { return .audio }
-        if mime.hasPrefix("image/") { return .image }
-        if mime == "application/pdf" { return .pdf }
+        if entry.isVideo || entry.isAudio { return .media }
+        if entry.isImage { return .image }
+        if entry.isPDF { return .pdf }
         return .other
     }
 
@@ -33,36 +31,18 @@ struct FilePreviewView: View {
         app.api?.contentURL(path: entry.path, inline: true)
     }
 
-    private var isMedia: Bool {
-        kind == .video || kind == .audio
-    }
-
     var body: some View {
         NavigationStack {
             Group {
-                if let inlineURL {
-                    switch kind {
-                    case .video:
-                        VStack(spacing: 0) {
-                            VideoPlayerScreen(url: inlineURL)
-                            mediaFooter(note: "部分编码（如部分 mkv）可能无法播放，可直接交给外部播放器。")
-                        }
-                    case .audio:
-                        VStack(spacing: 0) {
-                            ScrollView {
-                                AudioPlayerScreen(url: inlineURL)
-                            }
-                            mediaFooter(note: "可交给外部播放器在后台播放或处理更多格式。")
-                        }
-                    case .image:
-                        AuthenticatedImage(url: inlineURL)
-                    case .pdf:
-                        PDFPreviewScreen(url: inlineURL)
-                    case .other:
-                        otherView
-                    }
-                } else {
-                    ContentUnavailableView("无法预览", systemImage: "exclamationmark.triangle")
+                switch kind {
+                case .media:
+                    mediaView
+                case .image:
+                    imageView
+                case .pdf:
+                    pdfView
+                case .other:
+                    otherView
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -72,109 +52,164 @@ struct FilePreviewView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("关闭") { dismiss() }
                 }
-                ToolbarItemGroup(placement: .primaryAction) {
-                    if isMedia {
+            }
+            .task(id: entry.path) { await prepareLinkIfNeeded() }
+        }
+    }
+
+    // MARK: - 媒体
+
+    private var mediaView: some View {
+        ScrollView {
+            VStack(spacing: 22) {
+                Spacer(minLength: 24)
+
+                Image(systemName: entry.isVideo ? "film" : "waveform")
+                    .font(.system(size: 40, weight: .regular))
+                    .foregroundStyle(Theme.ink)
+                    .frame(width: 92, height: 92)
+                    .background(
+                        Color.primary.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    )
+
+                VStack(spacing: 5) {
+                    Text(entry.name)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error {
+                    ErrorNotice(text: error)
+                    Button("重试") {
+                        Task { await prepareLinkIfNeeded(force: true) }
+                    }
+                    .secondaryAction()
+                } else {
+                    VStack(spacing: 10) {
                         Button {
-                            preparePlaybackLink()
+                            openInVidHub()
                         } label: {
-                            if preparingLink {
+                            if preparing {
                                 ProgressView()
                                     .controlSize(.small)
+                                    .tint(Theme.onInk)
                             } else {
-                                Image(systemName: "arrow.up.forward.app")
+                                Label("用 VidHub 打开", systemImage: "arrow.up.forward.app")
                             }
                         }
-                        .disabled(preparingLink)
-                        .accessibilityLabel("用外部播放器打开")
-                    }
-                    Button {
-                        download()
-                    } label: {
-                        if downloading {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "square.and.arrow.down")
+                        .primaryAction(fullWidth: true)
+                        .disabled(preparing || shareLink == nil)
+
+                        Button {
+                            copyLink()
+                        } label: {
+                            Label(
+                                copied ? "链接已复制" : "复制链接",
+                                systemImage: copied ? "checkmark.circle.fill" : "doc.on.doc"
+                            )
+                            .frame(maxWidth: .infinity)
                         }
+                        .secondaryAction()
+                        .disabled(preparing || shareLink == nil)
                     }
-                    .disabled(downloading)
-                    .accessibilityLabel("下载文件")
+
+                    Text("链接 6 小时内有效，MKV 等格式由 VidHub 解码。")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
                 }
+
+                Spacer(minLength: 24)
             }
-            .sheet(item: $shareItem) { item in
-                ShareSheet(items: [item.url])
-                    .presentationDetents([.medium, .large])
-            }
-            .sheet(item: $playbackLink) { link in
-                PlaybackOptionsSheet(link: link)
-            }
+            .padding(24)
+            .frame(maxWidth: 460)
+            .frame(maxWidth: .infinity)
+        }
+        .appBackground()
+    }
+
+    private var subtitle: String {
+        let parts = [Format.bytes(entry.size), entry.fileExtension.uppercased()]
+        return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    // MARK: - 图片与 PDF
+
+    @ViewBuilder
+    private var imageView: some View {
+        if let inlineURL {
+            AuthenticatedImage(url: inlineURL)
+        } else {
+            unavailable
+        }
+    }
+
+    @ViewBuilder
+    private var pdfView: some View {
+        if let inlineURL {
+            PDFPreviewScreen(url: inlineURL)
+        } else {
+            unavailable
         }
     }
 
     private var otherView: some View {
-        ContentUnavailableView {
-            Label("该文件类型不支持在线预览", systemImage: "doc")
-        } description: {
-            Text("可下载后在支持的应用中打开。")
-        } actions: {
-            Button("下载文件") { download() }
-                .primaryAction()
+        ContentUnavailableView(
+            "该文件类型不支持预览",
+            systemImage: "doc",
+            description: Text("可通过文件列表复制链接或使用其他工具打开。")
+        )
+    }
+
+    private var unavailable: some View {
+        ContentUnavailableView("无法预览", systemImage: "exclamationmark.triangle")
+    }
+
+    // MARK: - 链接
+
+    private func prepareLinkIfNeeded(force: Bool = false) async {
+        guard kind == .media else { return }
+        if !force, shareLink != nil { return }
+        guard !preparing else { return }
+
+        preparing = true
+        error = nil
+        copied = false
+        defer { preparing = false }
+
+        do {
+            let api = try app.requireAPI()
+            shareLink = try await api.createShareLink(path: entry.path)
+        } catch {
+            self.error = APIError.describe(error)
         }
     }
 
-    private func mediaFooter(note: String) -> some View {
-        HStack(spacing: 10) {
-            Text(note)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 6)
-            Button {
-                preparePlaybackLink()
-            } label: {
-                Label("外部播放器", systemImage: "arrow.up.forward.app")
-            }
-            .inlineAction()
-            .disabled(preparingLink)
+    private func openInVidHub() {
+        guard let remote = remoteURL else { return }
+        guard let vidhub = ExternalPlayer.vidHubURL(for: remote),
+              ExternalPlayer.isVidHubInstalled else {
+            copyLink()
+            app.showToast("未安装 VidHub，已复制链接", style: .info)
+            return
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.bar)
+        ExternalPlayer.open(vidhub)
     }
 
-    private func preparePlaybackLink() {
-        guard !preparingLink, let api = app.api else { return }
-        preparingLink = true
-        Task {
-            do {
-                let share = try await api.createShareLink(path: entry.path)
-                guard let url = api.shareURL(token: share.token) else {
-                    throw APIError.invalidServer
-                }
-                playbackLink = PlaybackLink(
-                    url: url,
-                    filename: entry.name,
-                    expiresAt: share.expiresAt
-                )
-            } catch {
-                app.showToast(APIError.describe(error), style: .error)
-            }
-            preparingLink = false
-        }
+    private func copyLink() {
+        guard let remote = remoteURL else { return }
+        UIPasteboard.general.string = remote.absoluteString
+        copied = true
+        app.showToast("链接已复制", style: .success)
     }
 
-    private func download() {
-        guard !downloading, let api = app.api else { return }
-        downloading = true
-        Task {
-            do {
-                let remote = api.contentURL(path: entry.path, inline: false)
-                let local = try await FileDownloader.download(url: remote, filename: entry.name)
-                shareItem = ShareItem(url: local)
-            } catch {
-                app.showToast(APIError.describe(error), style: .error)
-            }
-            downloading = false
-        }
+    private var remoteURL: URL? {
+        guard let shareLink else { return nil }
+        return app.api?.shareURL(token: shareLink.token)
     }
 }

@@ -1,13 +1,42 @@
-"""下载目录浏览：路径安全校验与目录枚举。"""
+"""下载目录浏览：路径安全校验、媒体类型识别与目录枚举。"""
 
 from __future__ import annotations
 
 import mimetypes
 from pathlib import Path
 
+# 容器与播放器常见的扩展名，系统 mimetypes 不一定覆盖（尤其是 mkv）
+EXTRA_MIME_TYPES = {
+    ".mkv": "video/x-matroska",
+    ".m4v": "video/x-m4v",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".webm": "video/webm",
+    ".flv": "video/x-flv",
+    ".ts": "video/mp2t",
+    ".wmv": "video/x-ms-wmv",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+    ".opus": "audio/opus",
+    ".ogg": "audio/ogg",
+    ".wav": "audio/wav",
+    ".srt": "text/plain",
+    ".ass": "text/plain",
+}
+
 
 class FileAccessError(Exception):
     """目标路径越界或不可用。"""
+
+
+def guess_mime(name: str) -> str | None:
+    """按扩展名推断 MIME，优先使用显式媒体类型表。"""
+    suffix = Path(name).suffix.lower()
+    if suffix in EXTRA_MIME_TYPES:
+        return EXTRA_MIME_TYPES[suffix]
+    return mimetypes.guess_type(name)[0]
 
 
 def resolve_path(root: Path, relative: str) -> Path:
@@ -53,7 +82,7 @@ def list_dir(root: Path, relative: str) -> dict:
                 "is_dir": is_dir,
                 "size": 0 if is_dir else stat.st_size,
                 "mtime": int(stat.st_mtime),
-                "mime": None if is_dir else mimetypes.guess_type(child.name)[0],
+                "mime": None if is_dir else guess_mime(child.name),
             }
         )
 

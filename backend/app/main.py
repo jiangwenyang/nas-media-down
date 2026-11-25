@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import mimetypes
 import re
 import shutil
 from contextlib import asynccontextmanager
@@ -16,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from . import auth, bangumi, bilibili, db
 from .config import APP_VERSION, ConfigError, load_settings
 from .downloader import JobCreateError, JobManager
-from .files import FileAccessError, list_dir, resolve_path
+from .files import FileAccessError, guess_mime, list_dir, resolve_path
 from .models import (
     BangumiDownloadBody,
     BangumiSubscribeBody,
@@ -171,7 +170,7 @@ def file_content(request: Request, path: str, inline: bool = False) -> FileRespo
     if not target.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
 
-    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    media_type = guess_mime(target.name) or "application/octet-stream"
     allow_inline = inline and (
         media_type.startswith(INLINE_MIME_PREFIXES) or media_type == "application/pdf"
     )
@@ -369,7 +368,7 @@ def shared_file(token: str, request: Request) -> FileResponse:
     if not target.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
 
-    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    media_type = guess_mime(target.name) or "application/octet-stream"
     allow_inline = media_type.startswith(INLINE_MIME_PREFIXES) or media_type == "application/pdf"
     return FileResponse(
         target,

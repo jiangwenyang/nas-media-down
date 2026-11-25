@@ -19,6 +19,7 @@ import { useToast } from '../composables/useToast'
 import type { FileEntry, FileListing } from '../types'
 import { formatBytes, formatDate } from '../utils/format'
 import PreviewDialog from './PreviewDialog.vue'
+import MediaLinkDialog from './MediaLinkDialog.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 
 const { push } = useToast()
@@ -28,6 +29,7 @@ const path = ref('')
 const loading = ref(false)
 const error = ref('')
 const preview = ref<FileEntry | null>(null)
+const mediaLink = ref<FileEntry | null>(null)
 const pendingDelete = ref<FileEntry | null>(null)
 const deleting = ref(false)
 
@@ -64,19 +66,56 @@ onMounted(() => {
   void load('')
 })
 
-function isPreviewable(entry: FileEntry): boolean {
-  const mime = entry.mime ?? ''
+function isVideo(entry: FileEntry): boolean {
   return (
-    mime.startsWith('video/') ||
-    mime.startsWith('audio/') ||
-    mime.startsWith('image/') ||
-    mime === 'application/pdf'
+    (entry.mime ?? '').startsWith('video/') ||
+    /\.(mkv|mp4|m4v|mov|webm|avi|flv|ts|wmv|3gp)$/i.test(entry.name)
   )
+}
+
+function isAudio(entry: FileEntry): boolean {
+  return (
+    (entry.mime ?? '').startsWith('audio/') ||
+    /\.(mp3|m4a|aac|flac|wav|opus|ogg|oga|aiff|alac)$/i.test(entry.name)
+  )
+}
+
+function isMedia(entry: FileEntry): boolean {
+  return isVideo(entry) || isAudio(entry)
+}
+
+function isImage(entry: FileEntry): boolean {
+  return (
+    (entry.mime ?? '').startsWith('image/') ||
+    /\.(jpg|jpeg|png|gif|webp|heic|heif|bmp|tiff)$/i.test(entry.name)
+  )
+}
+
+function isPDF(entry: FileEntry): boolean {
+  return entry.mime === 'application/pdf' || /\.pdf$/i.test(entry.name)
+}
+
+function isPreviewable(entry: FileEntry): boolean {
+  return isMedia(entry) || isImage(entry) || isPDF(entry)
 }
 
 function openEntry(entry: FileEntry): void {
   if (entry.is_dir) {
     void load(entry.path)
+    return
+  }
+  if (isMedia(entry)) {
+    mediaLink.value = entry
+    return
+  }
+  if (isPreviewable(entry)) {
+    preview.value = entry
+  }
+}
+
+function openPreview(entry: FileEntry): void {
+  if (isMedia(entry)) {
+    mediaLink.value = entry
     return
   }
   if (isPreviewable(entry)) {
@@ -86,21 +125,19 @@ function openEntry(entry: FileEntry): void {
 
 function iconFor(entry: FileEntry) {
   if (entry.is_dir) return Folder
-  const mime = entry.mime ?? ''
-  if (mime.startsWith('video/')) return FilePlay
-  if (mime.startsWith('audio/')) return FileHeadphone
-  if (mime.startsWith('image/')) return FileImage
-  if (mime === 'application/pdf' || mime.startsWith('text/')) return FileText
+  if (isVideo(entry)) return FilePlay
+  if (isAudio(entry)) return FileHeadphone
+  if (isImage(entry)) return FileImage
+  if (isPDF(entry) || (entry.mime ?? '').startsWith('text/')) return FileText
   return File
 }
 
 function iconClass(entry: FileEntry): string {
   if (entry.is_dir) return 'text-amber-300/80'
-  const mime = entry.mime ?? ''
-  if (mime.startsWith('video/')) return 'text-cyan-300/80'
-  if (mime.startsWith('audio/')) return 'text-indigo-300/80'
-  if (mime.startsWith('image/')) return 'text-emerald-300/80'
-  if (mime === 'application/pdf') return 'text-rose-300/80'
+  if (isVideo(entry)) return 'text-cyan-300/80'
+  if (isAudio(entry)) return 'text-indigo-300/80'
+  if (isImage(entry)) return 'text-emerald-300/80'
+  if (isPDF(entry)) return 'text-rose-300/80'
   return 'text-slate-500'
 }
 
@@ -205,8 +242,8 @@ async function confirmDelete(): Promise<void> {
               v-if="isPreviewable(entry)"
               type="button"
               class="icon-btn h-8 w-8"
-              title="预览"
-              @click="preview = entry"
+              :title="isMedia(entry) ? '播放链接' : '预览'"
+              @click="openPreview(entry)"
             >
               <Eye :size="14" />
             </button>
@@ -244,6 +281,7 @@ async function confirmDelete(): Promise<void> {
     </div>
 
     <PreviewDialog v-if="preview" :entry="preview" @close="preview = null" />
+    <MediaLinkDialog v-if="mediaLink" :entry="mediaLink" @close="mediaLink = null" />
     <ConfirmDialog
       v-if="pendingDelete"
       title="删除文件"

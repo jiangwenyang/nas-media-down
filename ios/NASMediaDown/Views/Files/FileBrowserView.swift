@@ -19,10 +19,6 @@ struct FileBrowserView: View {
     @State private var error: String?
     @State private var preview: FileEntry?
     @State private var pendingDelete: FileEntry?
-    @State private var shareItem: ShareItem?
-    @State private var downloadingPath: String?
-    @State private var preparingLinkPath: String?
-    @State private var playbackLink: PlaybackLink?
 
     var body: some View {
         if isRoot {
@@ -104,13 +100,6 @@ struct FileBrowserView: View {
         .sheet(item: $preview) { entry in
             FilePreviewView(entry: entry)
         }
-        .sheet(item: $playbackLink) { link in
-            PlaybackOptionsSheet(link: link)
-        }
-        .sheet(item: $shareItem) { item in
-            ShareSheet(items: [item.url])
-                .presentationDetents([.medium, .large])
-        }
         .confirmationDialog(
             "删除文件",
             isPresented: Binding(
@@ -148,11 +137,7 @@ struct FileBrowserView: View {
             }
         } else {
             Button {
-                if isMedia(entry) {
-                    requestPlayback(entry)
-                } else {
-                    open(entry)
-                }
+                open(entry)
             } label: {
                 entryRow(entry)
             }
@@ -163,48 +148,14 @@ struct FileBrowserView: View {
                 } label: {
                     Label("删除", systemImage: "trash")
                 }
-                Button {
-                    download(entry)
-                } label: {
-                    Label("下载", systemImage: "square.and.arrow.down")
-                }
-                .tint(Theme.accent)
-                if isMedia(entry) {
-                    Button {
-                        requestPlayback(entry)
-                    } label: {
-                        Label("外部播放", systemImage: "arrow.up.forward.app")
-                    }
-                    .tint(Theme.accent)
-                }
-                if entry.isPreviewable {
-                    Button {
-                        preview = entry
-                    } label: {
-                        Label("预览", systemImage: "eye")
-                    }
-                    .tint(.secondary)
-                }
             }
             .contextMenu {
                 if entry.isPreviewable {
                     Button {
                         preview = entry
                     } label: {
-                        Label("在线预览", systemImage: "eye")
+                        Label("预览", systemImage: "eye")
                     }
-                }
-                if isMedia(entry) {
-                    Button {
-                        requestPlayback(entry)
-                    } label: {
-                        Label("用外部播放器打开", systemImage: "arrow.up.forward.app")
-                    }
-                }
-                Button {
-                    download(entry)
-                } label: {
-                    Label("下载到本地", systemImage: "square.and.arrow.down")
                 }
                 Button(role: .destructive) {
                     pendingDelete = entry
@@ -240,38 +191,20 @@ struct FileBrowserView: View {
             }
 
             Spacer(minLength: 4)
-
-            if downloadingPath == entry.path || preparingLinkPath == entry.path {
-                ProgressView()
-                    .controlSize(.small)
-            } else if !entry.isDir && isMedia(entry) {
-                Image(systemName: "arrow.up.forward.app")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 30, height: 30)
-                    .background(Theme.accent.opacity(0.1), in: Circle())
-                    .accessibilityHidden(true)
-            }
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())
-    }
-
-    private func isMedia(_ entry: FileEntry) -> Bool {
-        let mime = entry.mime ?? ""
-        return mime.hasPrefix("video/") || mime.hasPrefix("audio/")
     }
 
     private func icon(for entry: FileEntry) -> (name: String, tint: Color) {
         if entry.isDir {
             return ("folder.fill", Color.secondary)
         }
-        let mime = entry.mime ?? ""
-        if mime.hasPrefix("video/") { return ("play.rectangle.fill", Theme.accent) }
-        if mime.hasPrefix("audio/") { return ("waveform", Color.secondary) }
-        if mime.hasPrefix("image/") { return ("photo.fill", Theme.success) }
-        if mime == "application/pdf" { return ("doc.text.fill", Theme.danger) }
-        if mime.hasPrefix("text/") { return ("doc.text.fill", .secondary) }
+        if entry.isVideo { return ("play.rectangle.fill", Theme.accent) }
+        if entry.isAudio { return ("waveform", Color.secondary) }
+        if entry.isImage { return ("photo.fill", Theme.success) }
+        if entry.isPDF { return ("doc.text.fill", Theme.danger) }
+        if (entry.mime ?? "").hasPrefix("text/") { return ("doc.text.fill", .secondary) }
         return ("doc.fill", .secondary)
     }
 
@@ -292,45 +225,7 @@ struct FileBrowserView: View {
         if entry.isPreviewable {
             preview = entry
         } else {
-            download(entry)
-        }
-    }
-
-    private func download(_ entry: FileEntry) {
-        guard downloadingPath == nil else { return }
-        downloadingPath = entry.path
-        Task {
-            do {
-                let api = try app.requireAPI()
-                let remote = api.contentURL(path: entry.path, inline: false)
-                let local = try await FileDownloader.download(url: remote, filename: entry.name)
-                shareItem = ShareItem(url: local)
-            } catch {
-                app.showToast(APIError.describe(error), style: .error)
-            }
-            downloadingPath = nil
-        }
-    }
-
-    private func requestPlayback(_ entry: FileEntry) {
-        guard preparingLinkPath == nil else { return }
-        preparingLinkPath = entry.path
-        Task {
-            do {
-                let api = try app.requireAPI()
-                let share = try await api.createShareLink(path: entry.path)
-                guard let url = api.shareURL(token: share.token) else {
-                    throw APIError.invalidServer
-                }
-                playbackLink = PlaybackLink(
-                    url: url,
-                    filename: entry.name,
-                    expiresAt: share.expiresAt
-                )
-            } catch {
-                app.showToast(APIError.describe(error), style: .error)
-            }
-            preparingLinkPath = nil
+            app.showToast("该文件类型暂不支持预览", style: .info)
         }
     }
 

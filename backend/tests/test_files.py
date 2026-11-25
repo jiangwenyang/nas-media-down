@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app.files import FileAccessError, list_dir, resolve_path
+from app.files import FileAccessError, guess_mime, list_dir, resolve_path
 
 
 @pytest.fixture()
@@ -76,3 +76,19 @@ def test_list_dir_reports_parent(root: Path) -> None:
 def test_list_dir_rejects_file(root: Path) -> None:
     with pytest.raises(FileAccessError):
         list_dir(root, "b.txt")
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("movie.mkv", "video/x-matroska"),
+        ("movie.MKV", "video/x-matroska"),
+        ("clip.webm", "video/webm"),
+        ("audio.flac", "audio/flac"),
+        ("audio.opus", "audio/opus"),
+        ("subtitle.srt", "text/plain"),
+        ("image.png", "image/png"),
+    ],
+)
+def test_guess_mime(name: str, expected: str) -> None:
+    assert guess_mime(name) == expected

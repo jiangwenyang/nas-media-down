@@ -14,6 +14,7 @@ import type {
   Job,
   JobDetail,
   ProbeResult,
+  ShareLink,
 } from './types'
 
 export class ApiError extends Error {
@@ -102,6 +103,12 @@ export const api = {
       `/files?path=${encodeURIComponent(path)}&recursive=${recursive ? 1 : 0}`,
       { method: 'DELETE' },
     ),
+  createShareLink: (path: string) =>
+    request<ShareLink>('/files/share', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
+  shareUrl: (token: string) => `/api/share/${encodeURIComponent(token)}`,
   contentUrl: (path: string, inline = false) =>
     `/api/files/content?path=${encodeURIComponent(path)}&inline=${inline ? 1 : 0}`,
   bilibiliQrCode: () =>
