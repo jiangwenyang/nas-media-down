@@ -21,3 +21,8 @@ cookies.txt
 .DS_Store
 .idea/
 .vscode/
+
+# iOS
+ios/build/
+xcuserdata/
+*.xcuserstate

@@ -61,3 +61,9 @@ class BangumiDownloadBody(BaseModel):
 
     season_id: int = Field(gt=0)
     episode_indices: list[int] = Field(min_length=1, max_length=2000)
+
+
+class ShareLinkBody(BaseModel):
+    """为下载目录内的文件签发短期分享链接。"""
+
+    path: str = Field(min_length=1, max_length=4096)

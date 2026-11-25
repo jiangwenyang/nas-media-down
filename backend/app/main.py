@@ -23,8 +23,10 @@ from .models import (
     BangumiUpdateBody,
     JobCreateBody,
     ProbeBody,
+    ShareLinkBody,
 )
 from .probe import ProbeError, probe_url
+from .share import ShareLinkStore
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,7 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.db_path = db_path
     app.state.login_limiter = auth.LoginRateLimiter()
+    app.state.share_links = ShareLinkStore()
     app.state.jobs = JobManager(settings)
     app.state.bangumi = bangumi.BangumiManager(settings, app.state.jobs)
     app.state.bangumi.start()
@@ -202,6 +205,20 @@ def delete_file(request: Request, path: str, recursive: bool = False) -> Respons
     return Response(status_code=204)
 
 
+@api.post("/files/share")
+def create_share_link(body: ShareLinkBody, request: Request) -> dict:
+    """为文件签发短期链接，供外部播放器在不携带 Cookie 时访问。"""
+    settings = request.app.state.settings
+    try:
+        target = resolve_path(settings.download_dir, body.path)
+    except FileAccessError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    token, expires_at = request.app.state.share_links.create(target)
+    return {"token": token, "expires_at": expires_at}
+
+
 @api.post("/bilibili/qrcode")
 def bilibili_qrcode() -> dict:
     """生成哔哩哔哩登录二维码。"""
@@ -341,6 +358,26 @@ def bangumi_download_all(sub_id: str, request: Request) -> dict:
 
 
 app.include_router(api)
+
+
+@app.api_route("/api/share/{token}", methods=["GET", "HEAD"], include_in_schema=False)
+def shared_file(token: str, request: Request) -> FileResponse:
+    """公开访问分享链接；token 唯一对应一个文件，且短期有效。"""
+    target = request.app.state.share_links.resolve(token)
+    if target is None:
+        raise HTTPException(status_code=404, detail="链接已过期或不存在")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    allow_inline = media_type.startswith(INLINE_MIME_PREFIXES) or media_type == "application/pdf"
+    return FileResponse(
+        target,
+        media_type=media_type,
+        filename=target.name,
+        content_disposition_type="inline" if allow_inline else "attachment",
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 def _mount_static() -> None:
