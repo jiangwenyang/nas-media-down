@@ -46,13 +46,6 @@ struct DownloadView: View {
             .appBackground()
             .navigationTitle("下载")
             .navigationBarTitleDisplayMode(.large)
-            .onAppear(perform: consumeSharedLink)
-            .onChange(of: app.pendingProbeURL) { _, _ in
-                consumeSharedLink()
-            }
-            .onChange(of: probing) { _, active in
-                if !active { consumeSharedLink() }
-            }
             .sheet(isPresented: $showPlaylist) {
                 if let playlist = result?.playlist {
                     PlaylistPickerView(
@@ -283,15 +276,6 @@ struct DownloadView: View {
     }
 
     // MARK: - 动作
-
-    /// 接收分享扩展传入的链接并立即探测。
-    private func consumeSharedLink() {
-        guard !probing, let link = app.consumePendingProbeURL() else { return }
-        urlText = link
-        result = nil
-        probeError = nil
-        probe()
-    }
 
     private func pasteFromClipboard() {
         if let text = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
