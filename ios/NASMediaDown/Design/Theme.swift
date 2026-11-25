@@ -142,11 +142,6 @@ extension View {
         buttonStyle(CompactActionButtonStyle())
     }
 
-    /// 极紧凑操作（海报卡片等窄空间）。
-    func microAction() -> some View {
-        buttonStyle(MicroActionButtonStyle())
-    }
-
     /// 破坏性操作按钮。
     func destructiveAction(compact: Bool = false) -> some View {
         buttonStyle(DestructiveActionButtonStyle(compact: compact))
@@ -211,25 +206,6 @@ struct CompactActionButtonStyle: ButtonStyle {
             .padding(.horizontal, 10)
             .frame(minHeight: 30)
             .background(Theme.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .opacity(isEnabled ? 1 : 0.4)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
-    }
-}
-
-/// 极紧凑按钮：用于海报卡片内的并列操作。
-struct MicroActionButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.caption2.weight(.medium))
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .foregroundStyle(Theme.ink)
-            .padding(.horizontal, 7)
-            .frame(minHeight: 30)
-            .background(Theme.muted, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .opacity(isEnabled ? 1 : 0.4)
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .animation(.easeOut(duration: 0.15), value: configuration.isPressed)

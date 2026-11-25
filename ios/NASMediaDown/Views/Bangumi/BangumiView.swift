@@ -27,25 +27,23 @@ struct BangumiView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        header
-                        if !loginChecked {
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .fill(Color.primary.opacity(0.05))
-                                .frame(height: 92)
-                        } else {
-                            loginPrompt
-                            subscriptionsSection(proxy: proxy)
-                            if loggedIn {
-                                followSection(proxy: proxy)
-                            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    header
+                    if !loginChecked {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color.primary.opacity(0.05))
+                            .frame(height: 92)
+                    } else {
+                        loginPrompt
+                        subscriptionsSection()
+                        if loggedIn {
+                            followSection()
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 28)
                 }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 28)
             }
             .appBackground()
             .navigationTitle("追番 · 追剧")
@@ -125,7 +123,7 @@ struct BangumiView: View {
         }
     }
 
-    private func subscriptionsSection(proxy: ScrollViewProxy) -> some View {
+    private func subscriptionsSection() -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 SectionHeader(
@@ -165,14 +163,13 @@ struct BangumiView: View {
                 )
             } else {
                 ForEach(subscriptions) { subscription in
-                    subscriptionCard(subscription, proxy: proxy)
-                        .id("sub-\(subscription.id)")
+                    subscriptionCard(subscription)
                 }
             }
         }
     }
 
-    private func followSection(proxy: ScrollViewProxy) -> some View {
+    private func followSection() -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 SectionHeader(title: "我的关注", subtitle: "共 \(total) 部")
@@ -194,7 +191,7 @@ struct BangumiView: View {
                     ForEach(0..<4, id: \.self) { _ in
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .fill(Color.primary.opacity(0.05))
-                            .frame(height: 260)
+                            .frame(height: 430)
                     }
                 }
             } else if items.isEmpty && followError == nil {
@@ -206,7 +203,7 @@ struct BangumiView: View {
             } else {
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(items) { item in
-                        posterCard(item, proxy: proxy)
+                        posterCard(item)
                     }
                 }
             }
@@ -232,7 +229,7 @@ struct BangumiView: View {
         }
     }
 
-    private func subscriptionCard(_ sub: BangumiSubscription, proxy: ScrollViewProxy) -> some View {
+    private func subscriptionCard(_ sub: BangumiSubscription) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 RemoteImage(urlString: sub.cover, symbol: "sparkles.tv")
@@ -272,7 +269,10 @@ struct BangumiView: View {
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")
+                                .font(.body)
                                 .foregroundStyle(.secondary)
+                                .frame(width: 36, height: 36)
+                                .contentShape(Rectangle())
                         }
                         .disabled(busy != nil)
                     }
@@ -324,29 +324,34 @@ struct BangumiView: View {
                         }
                         Text("立即检查")
                     }
+                    .frame(maxWidth: .infinity, minHeight: 40)
                 }
-                .inlineAction()
+                .secondaryAction(compact: true)
                 .disabled(busy != nil)
 
-                Button("选集下载") {
+                Button {
                     openEpisodes(sub.seasonId, title: sub.title, subscribed: true)
+                } label: {
+                    Text("选集下载")
+                        .frame(maxWidth: .infinity, minHeight: 40)
                 }
-                .inlineAction()
+                .secondaryAction(compact: true)
                 .disabled(busy != nil)
 
-                Button("下载全部") {
+                Button {
                     downloadAll(sub)
+                } label: {
+                    Text("下载全部")
+                        .frame(maxWidth: .infinity, minHeight: 40)
                 }
-                .inlineAction()
+                .secondaryAction(compact: true)
                 .disabled(busy != nil)
-
-                Spacer(minLength: 0)
             }
         }
         .cardSurface()
     }
 
-    private func posterCard(_ item: BangumiFollowItem, proxy: ScrollViewProxy) -> some View {
+    private func posterCard(_ item: BangumiFollowItem) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topLeading) {
                 RemoteImage(urlString: item.cover, symbol: "sparkles.tv")
@@ -354,92 +359,99 @@ struct BangumiView: View {
                     .frame(maxWidth: .infinity)
                     .clipped()
 
-                VStack(alignment: .leading, spacing: 4) {
-                    StatusBadge(
-                        text: item.isFinish ? "已完结" : "连载中",
-                        tint: item.isFinish ? .secondary : Theme.accent
-                    )
+                HStack(spacing: 6) {
+                    coverTag(item.isFinish ? "已完结" : "连载中")
                     if item.subscribed {
-                        StatusBadge(text: "已追更", tint: Theme.success)
+                        coverTag("已追更")
                     }
                 }
                 .padding(8)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(item.title)
-                    .font(.footnote.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
-                    .frame(height: 36, alignment: .topLeading)
+                    .frame(height: 40, alignment: .topLeading)
 
-                Text(item.newEp?.title ?? item.seasonTitle ?? "暂无更新信息")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                if item.totalCount > 0 {
-                    Text("共 \(item.totalCount) 集")
-                        .font(.caption2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.newEp?.title ?? item.seasonTitle ?? "暂无更新信息")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text(item.totalCount > 0 ? "共 \(item.totalCount) 集" : "集数未知")
                         .foregroundStyle(.tertiary)
-                } else {
-                    Text("集数未知")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
+                .font(.caption2)
+                .frame(height: 32, alignment: .topLeading)
 
-                VStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Button {
                         openEpisodes(item.seasonId, title: item.title, subscribed: item.subscribed)
                     } label: {
-                        Text("选集下载")
-                            .frame(maxWidth: .infinity)
+                        Image(systemName: "checklist")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 42)
                     }
-                    .inlineAction()
+                    .secondaryAction(compact: true)
                     .disabled(busy != nil)
+                    .accessibilityLabel("选集下载")
 
-                    if item.subscribed {
-                        Button("查看进度") {
-                            if let id = item.subscriptionId {
-                                withAnimation(.smooth) {
-                                    proxy.scrollTo("sub-\(id)", anchor: .center)
+                    if !item.subscribed {
+                        Button {
+                            subscribe(item, mode: "watch")
+                        } label: {
+                            Group {
+                                if isBusy("watch-\(item.seasonId)") {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                } else {
+                                    Image(systemName: "bell.badge")
+                                        .font(.system(size: 15, weight: .semibold))
                                 }
                             }
+                            .frame(maxWidth: .infinity, minHeight: 42)
                         }
-                        .buttonStyle(.plain)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(Theme.accent)
-                        .frame(maxWidth: .infinity)
-                    } else {
-                        HStack(spacing: 6) {
-                            Button {
-                                subscribe(item, mode: "watch")
-                            } label: {
-                                Text(isBusy("watch-\(item.seasonId)") ? "处理中…" : "追更")
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .microAction()
-                            .disabled(busy != nil)
-
-                            Button {
-                                subscribe(item, mode: "all")
-                            } label: {
-                                Text(isBusy("all-\(item.seasonId)") ? "加入中…" : "下载全集")
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .microAction()
-                            .disabled(busy != nil)
-                        }
+                        .secondaryAction(compact: true)
+                        .disabled(busy != nil)
+                        .accessibilityLabel("追更")
                     }
+
+                    Button {
+                        subscribe(item, mode: "all")
+                    } label: {
+                        Group {
+                            if isBusy("all-\(item.seasonId)") {
+                                ProgressView()
+                                    .controlSize(.mini)
+                            } else {
+                                Image(systemName: "arrow.down.to.line")
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                    }
+                    .secondaryAction(compact: true)
+                    .disabled(busy != nil)
+                    .accessibilityLabel(item.subscribed ? "下载全部" : "下载全集")
                 }
-                .padding(.top, 2)
             }
-            .padding(10)
+            .padding(12)
         }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .cardSurface(padded: false)
+    }
+
+    /// 封面标签：深色半透明底，保证在任意封面上都清晰。
+    private func coverTag(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.black.opacity(0.62), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16)))
+            .shadow(color: .black.opacity(0.28), radius: 4, y: 1)
     }
 
     // MARK: - 状态与动作
