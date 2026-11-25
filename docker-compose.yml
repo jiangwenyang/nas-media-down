@@ -1,0 +1,43 @@
+services:
+  nas-media-down:
+    build: .
+    image: nas-media-down:latest
+    container_name: nas-media-down
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      # 必填；缺失时 compose 与后端都会拒绝启动
+      ACCESS_PASSWORD: ${ACCESS_PASSWORD:?请在 .env 中设置 ACCESS_PASSWORD}
+      PUID: ${PUID:-1026}
+      PGID: ${PGID:-100}
+      TZ: ${TZ:-Asia/Shanghai}
+      DOWNLOAD_DIR: /downloads
+      DATA_DIR: /data
+      MAX_CONCURRENT: ${MAX_CONCURRENT:-2}
+      MAX_PLAYLIST_ITEMS: ${MAX_PLAYLIST_ITEMS:-500}
+      MERGE_FORMAT: ${MERGE_FORMAT:-mp4/mkv}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIES_FILE: ${COOKIES_FILE:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
+    volumes:
+      - ${DOWNLOAD_PATH:-./downloads}:/downloads
+      - ${DATA_PATH:-./data}:/data
+      # 需要 cookies 的站点：把 cookies.txt 放到宿主机后取消下面这行注释
+      # - ${COOKIES_PATH:-./cookies.txt}:/data/cookies.txt:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
