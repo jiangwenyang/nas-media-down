@@ -85,7 +85,7 @@ struct DownloadView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                TextField("粘贴视频或播放列表网址…", text: $urlText)
+                TextField("粘贴网址或 B 站分享文本…", text: $urlText)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -139,7 +139,7 @@ struct DownloadView: View {
                 .disabled(probing)
             }
 
-            Text("支持 yt-dlp 可解析的站点（YouTube、Bilibili 等），也可直接粘贴 m3u8 链接；播放列表会弹出选择。")
+            Text("支持粘贴 B 站分享文本（含 b23.tv 短链）、YouTube 等站点链接，也可直接粘贴 m3u8；播放列表会弹出选择。")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

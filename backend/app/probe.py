@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from urllib.parse import urlparse
 
@@ -11,14 +12,25 @@ from .bilibili import cookiefile_for
 from .config import Settings
 from .errors import friendly_error
 
+# 从 B 站等 App 的分享文本中提取链接
+URL_PATTERN = re.compile(
+    r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+",
+    re.IGNORECASE,
+)
+TRAILING_PUNCTUATION = ".,;:!?)]}>，。；：！？、】」』》〉\"'"
+
 
 class ProbeError(Exception):
     """探测失败，消息可直接展示给用户。"""
 
 
-def validate_url(url: str) -> str:
-    """校验并规范化用户输入的 URL，只允许 http/https。"""
-    cleaned = (url or "").strip()
+def validate_url(text: str) -> str:
+    """从网址或分享文本中提取第一个 http/https 链接并规范化。"""
+    raw = (text or "").strip()
+    match = URL_PATTERN.search(raw)
+    if not match:
+        raise ValueError("未找到有效链接，请粘贴网址或完整分享文本")
+    cleaned = match.group(0).rstrip(TRAILING_PUNCTUATION)
     parsed = urlparse(cleaned)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError("请输入有效的 http/https 网址")

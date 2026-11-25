@@ -51,11 +51,13 @@ function submit(): void {
         <input
           ref="inputRef"
           :value="modelValue"
-          type="url"
+          type="text"
           inputmode="url"
           spellcheck="false"
           autocomplete="off"
-          placeholder="粘贴视频或播放列表网址…"
+          autocapitalize="off"
+          autocorrect="off"
+          placeholder="粘贴网址或 B 站分享文本…"
           class="field py-3.5 pr-24 pl-10 sm:py-4"
           :disabled="loading"
           @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
@@ -78,7 +80,7 @@ function submit(): void {
       </button>
     </div>
     <p class="mt-3 text-[11px] leading-relaxed text-slate-500">
-      支持 yt-dlp 可解析的站点（YouTube、Bilibili 等），也可直接粘贴 m3u8 链接；播放列表会弹窗供勾选。
+      支持粘贴 B 站 App 分享文本（含标题与 b23.tv 短链）、YouTube 等站点链接，也可直接粘贴 m3u8 链接；播放列表会弹窗供勾选。
     </p>
   </form>
 </template>
