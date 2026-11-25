@@ -122,6 +122,19 @@ cd backend && ../.venv/bin/python -m pytest tests/ -q
 cd frontend && npm run build
 ```
 
+## 常见问题
+
+### 启动报 `PermissionError: '/app/app/__init__.py'`
+
+从 NAS/SMB 复制的源码可能带 600/700 权限，`COPY` 进镜像后容器内的 `app` 用户无法读取。当前版本会在构建时与容器启动时执行 `chmod -R a+rX /app`。更新代码后重新构建即可：
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+不需要 `--no-cache`，Dockerfile 变更会使相关层自动重建。
+
 ## 已知限制
 
 - 容器重启不会续传进行中的下载，任务会标记为「已中断」，可手动重新下载。

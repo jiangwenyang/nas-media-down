@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 FROM node:22-bookworm-slim AS web
 WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
@@ -35,7 +33,8 @@ RUN groupadd -g 1000 app \
 COPY backend/app ./app
 COPY --from=web /web/dist ./static
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh \
+    && chmod -R a+rX /app
 
 EXPOSE 8080
 
