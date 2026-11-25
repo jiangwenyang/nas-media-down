@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 import yt_dlp
 
+from .bilibili import cookiefile_for
 from .config import Settings
 from .errors import friendly_error
 
@@ -24,7 +25,7 @@ def validate_url(url: str) -> str:
     return cleaned
 
 
-def _base_opts(settings: Settings) -> dict:
+def _base_opts(url: str, settings: Settings) -> dict:
     opts: dict = {
         "quiet": True,
         "no_warnings": True,
@@ -33,8 +34,9 @@ def _base_opts(settings: Settings) -> dict:
         "retries": 3,
         "noplaylist": False,
     }
-    if settings.cookies_file and settings.cookies_file.exists():
-        opts["cookiefile"] = str(settings.cookies_file)
+    cookiefile = cookiefile_for(url, settings)
+    if cookiefile:
+        opts["cookiefile"] = str(cookiefile)
     if shutil.which("deno"):
         opts["js_runtimes"] = {"deno": {}}
     return opts
@@ -80,7 +82,7 @@ def _entry_view(entry: dict, fallback_index: int) -> dict:
 def probe_url(url: str, settings: Settings) -> dict:
     """探测 URL：返回单视频信息或播放列表条目，供前端展示与勾选。"""
     url = validate_url(url)
-    opts = _base_opts(settings)
+    opts = _base_opts(url, settings)
     opts.update(
         {
             "extract_flat": "in_playlist",
@@ -110,7 +112,7 @@ def probe_url(url: str, settings: Settings) -> dict:
         video = None
         # YouTube 的 watch?v=X&list=Y 同时包含单个视频与播放列表，额外探测当前视频
         if "v=" in url and "list=" in url:
-            single_opts = _base_opts(settings)
+            single_opts = _base_opts(url, settings)
             single_opts["noplaylist"] = True
             try:
                 with yt_dlp.YoutubeDL(single_opts) as ydl:

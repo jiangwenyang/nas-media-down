@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import re
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,7 +13,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, 
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, db
+from . import auth, bilibili, db
 from .config import APP_VERSION, ConfigError, load_settings
 from .downloader import JobCreateError, JobManager
 from .files import FileAccessError, list_dir, resolve_path
@@ -190,6 +191,39 @@ def delete_file(request: Request, path: str, recursive: bool = False) -> Respons
     else:
         target.unlink()
     return Response(status_code=204)
+
+
+@api.post("/bilibili/qrcode")
+def bilibili_qrcode() -> dict:
+    """生成哔哩哔哩登录二维码。"""
+    try:
+        return bilibili.generate_qrcode()
+    except bilibili.BilibiliError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@api.get("/bilibili/qrcode/poll")
+def bilibili_poll(request: Request, key: str) -> dict:
+    """轮询扫码状态；登录成功后把 Cookie 保存到 DATA_DIR。"""
+    if not re.fullmatch(r"[A-Za-z0-9]{16,64}", key):
+        raise HTTPException(status_code=400, detail="无效的二维码参数")
+    try:
+        return bilibili.poll_qrcode(request.app.state.settings, key)
+    except bilibili.BilibiliError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@api.get("/bilibili/status")
+def bilibili_status(request: Request) -> dict:
+    """返回哔哩哔哩登录态与大会员状态。"""
+    return bilibili.session_status(request.app.state.settings)
+
+
+@api.post("/bilibili/logout")
+def bilibili_logout(request: Request) -> dict[str, bool]:
+    """删除本地哔哩哔哩登录 Cookie。"""
+    bilibili.logout(request.app.state.settings)
+    return {"ok": True}
 
 
 app.include_router(api)

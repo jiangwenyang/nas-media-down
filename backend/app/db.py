@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
+
+logger = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -65,11 +68,10 @@ def now_ts() -> int:
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
-    """建立带 WAL 的连接；每次调用独立连接，天然线程安全。"""
-    conn = sqlite3.connect(db_path, timeout=5.0)
+    """建立连接；WAL 只在初始化时设置，避免并发连接反复申请锁。"""
+    conn = sqlite3.connect(db_path, timeout=15.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA busy_timeout=15000")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
@@ -90,6 +92,9 @@ def init_db(db_path: Path) -> None:
     """创建数据库目录与全部表结构（幂等）。"""
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with session(db_path) as conn:
+        mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+        if str(mode).lower() != "wal":
+            logger.warning("SQLite 未能启用 WAL（当前 %s），并发写入可能受限", mode)
         conn.executescript(SCHEMA)
 
 

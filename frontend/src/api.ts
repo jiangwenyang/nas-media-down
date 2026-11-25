@@ -1,4 +1,7 @@
 import type {
+  BilibiliPoll,
+  BilibiliQrCode,
+  BilibiliStatus,
   CreateJobPayload,
   FileListing,
   Job,
@@ -94,4 +97,11 @@ export const api = {
     ),
   contentUrl: (path: string, inline = false) =>
     `/api/files/content?path=${encodeURIComponent(path)}&inline=${inline ? 1 : 0}`,
+  bilibiliQrCode: () =>
+    request<BilibiliQrCode>('/bilibili/qrcode', { method: 'POST' }),
+  bilibiliQrPoll: (key: string) =>
+    request<BilibiliPoll>(`/bilibili/qrcode/poll?key=${encodeURIComponent(key)}`),
+  bilibiliStatus: () => request<BilibiliStatus>('/bilibili/status'),
+  bilibiliLogout: () =>
+    request<{ ok: boolean }>('/bilibili/logout', { method: 'POST' }),
 }

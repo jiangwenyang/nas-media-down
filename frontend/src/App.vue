@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import type { Component } from 'vue'
-import { Download, FolderOpen, ListChecks, LogOut } from 'lucide-vue-next'
+import { Download, FolderOpen, ListChecks, LogOut, UserRound } from 'lucide-vue-next'
 import { useAuth } from './composables/useAuth'
 import { useJobs } from './composables/useJobs'
 import LoginView from './components/LoginView.vue'
 import DownloadView from './components/DownloadView.vue'
 import JobsView from './components/JobsView.vue'
 import FileBrowser from './components/FileBrowser.vue'
+import AccountView from './components/AccountView.vue'
 import ToastHost from './components/ToastHost.vue'
 
-type Tab = 'download' | 'jobs' | 'files'
+type Tab = 'download' | 'jobs' | 'files' | 'account'
 
 const tabs: Array<{ id: Tab; label: string; icon: Component }> = [
   { id: 'download', label: '下载', icon: Download },
   { id: 'jobs', label: '任务', icon: ListChecks },
   { id: 'files', label: '文件', icon: FolderOpen },
+  { id: 'account', label: '账号', icon: UserRound },
 ]
 
 const activeTab = ref<Tab>('download')
@@ -77,10 +79,12 @@ async function handleLogout(): Promise<void> {
                   ? 'bg-white/10 text-white shadow-[0_1px_0_rgba(255,255,255,0.08)_inset]'
                   : 'text-slate-400 hover:text-slate-200'
               "
+              :title="tab.label"
+              :aria-label="tab.label"
               @click="activeTab = tab.id"
             >
               <component :is="tab.icon" :size="16" />
-              <span>{{ tab.label }}</span>
+              <span class="hidden sm:inline">{{ tab.label }}</span>
             </button>
           </nav>
 
@@ -100,7 +104,8 @@ async function handleLogout(): Promise<void> {
         <div :key="activeTab" class="animate-float-in">
           <DownloadView v-if="activeTab === 'download'" @open-jobs="activeTab = 'jobs'" />
           <JobsView v-else-if="activeTab === 'jobs'" />
-          <FileBrowser v-else />
+          <FileBrowser v-else-if="activeTab === 'files'" />
+          <AccountView v-else />
         </div>
       </main>
 

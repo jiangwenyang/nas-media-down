@@ -17,6 +17,7 @@ import yt_dlp
 from yt_dlp.utils import DownloadCancelled
 
 from . import db
+from .bilibili import cookiefile_for
 from .config import Settings
 from .errors import friendly_error
 from .models import JobCreateBody
@@ -143,6 +144,7 @@ class JobManager:
         )
         self._jobs: dict[str, JobRuntime] = {}
         self._lock = threading.Lock()
+        self._db_lock = threading.Lock()
 
     # ------------------------------------------------------------------ create
 
@@ -230,7 +232,7 @@ class JobManager:
     # ----------------------------------------------------------------- storage
 
     def _persist_new_job(self, runtime: JobRuntime) -> None:
-        with db.session(self.db_path) as conn:
+        with self._db_lock, db.session(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT INTO jobs (id, url, kind, title, playlist_id, playlist_title,
@@ -303,7 +305,7 @@ class JobManager:
                 )
                 for item in runtime.items.values()
             ]
-        with db.session(self.db_path) as conn:
+        with self._db_lock, db.session(self.db_path) as conn:
             conn.execute(
                 """
                 UPDATE jobs
@@ -325,9 +327,10 @@ class JobManager:
 
     def _maybe_flush(self, runtime: JobRuntime) -> None:
         now = time.monotonic()
-        if now - runtime.last_flush < FLUSH_INTERVAL:
-            return
-        runtime.last_flush = now
+        with runtime.lock:
+            if now - runtime.last_flush < FLUSH_INTERVAL:
+                return
+            runtime.last_flush = now
         self._flush(runtime)
 
     # --------------------------------------------------------------- execution
@@ -353,8 +356,9 @@ class JobManager:
             opts["noplaylist"] = True
         else:
             opts["playlist_items"] = str(idx)
-        if self.settings.cookies_file and self.settings.cookies_file.exists():
-            opts["cookiefile"] = str(self.settings.cookies_file)
+        cookiefile = cookiefile_for(runtime.url, self.settings)
+        if cookiefile:
+            opts["cookiefile"] = str(cookiefile)
         if shutil.which("deno"):
             opts["js_runtimes"] = {"deno": {}}
         return opts
@@ -713,7 +717,7 @@ class JobManager:
             runtime = self._jobs.pop(job_id, None)
         if runtime is not None:
             runtime.cancel.set()
-        with db.session(self.db_path) as conn:
+        with self._db_lock, db.session(self.db_path) as conn:
             cursor = conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
             deleted = cursor.rowcount > 0
         return deleted or runtime is not None

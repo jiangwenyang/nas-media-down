@@ -19,6 +19,8 @@ def friendly_error(exc: BaseException) -> str:
         return "该视频在当前网络区域不可用"
     if isinstance(exc, (socket.timeout, TimeoutError)) or "timed out" in lowered:
         return "网络请求超时，请检查 NAS 的网络或代理设置"
+    if "database is locked" in lowered:
+        return "数据库繁忙（写入冲突），请稍后重试"
     if "http error 403" in lowered or "403: forbidden" in lowered:
         return "目标站点拒绝访问（403），可能需要配置 cookies.txt（需登录或有人机验证的站点）"
     if "sign in" in lowered or "cookies" in lowered or "login required" in lowered:

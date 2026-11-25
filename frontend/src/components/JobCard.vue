@@ -129,6 +129,32 @@ async function removeJob(): Promise<void> {
   }
 }
 
+async function retryItem(item: JobItem): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  try {
+    await api.createJob({
+      url: props.job.url,
+      kind: props.job.kind,
+      playlist_title: props.job.playlist_title,
+      entries: [
+        {
+          index: props.job.kind === 'video' ? 1 : item.idx,
+          title: item.title,
+          duration: item.duration,
+          thumbnail: item.thumbnail,
+        },
+      ],
+    })
+    push('已重新加入下载队列', 'success')
+    await refresh()
+  } catch (error) {
+    push(errorMessage(error), 'error')
+  } finally {
+    busy.value = false
+  }
+}
+
 async function retry(): Promise<void> {
   busy.value = true
   try {
@@ -273,6 +299,16 @@ async function retry(): Promise<void> {
           <span class="shrink-0 text-[11px] tabular-nums" :class="itemClass(item)">
             {{ itemLabel(item) }}
           </span>
+          <button
+            v-if="item.status === 'failed' || item.status === 'cancelled'"
+            type="button"
+            class="icon-btn h-7 w-7 shrink-0"
+            title="重试该视频"
+            :disabled="busy"
+            @click="retryItem(item)"
+          >
+            <RotateCcw :size="12" />
+          </button>
         </div>
         <div class="mt-1.5 flex items-center gap-2">
           <div class="progress-track h-1">

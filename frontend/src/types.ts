@@ -109,3 +109,23 @@ export interface CreateJobPayload {
     thumbnail?: string | null
   }>
 }
+
+export interface BilibiliQrCode {
+  url: string
+  key: string
+}
+
+export interface BilibiliPoll {
+  code: number
+  status: string
+  logged_in: boolean
+  uname: string | null
+  vip: boolean
+}
+
+export interface BilibiliStatus {
+  logged_in: boolean
+  uname: string | null
+  vip: boolean
+  expires_at: number | null
+}
